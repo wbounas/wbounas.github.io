@@ -1,33 +1,147 @@
-body {
-  background: #ffe2ae;
-  display: flex;
-  min-height: 100vh;
-  flex-direction: column;
+body,
+html {
+  background-color: #ededed !important;
 }
 
-.page-head-title {
+.devicon-git-plain {
+  max-width: 2em;
+}
+
+/* if you want to change the original color */
+.devicon-git-plain path {
+  fill: #4691f6;
+}
+
+.intro {
+  text-align: center;
+  padding-top: 13%;
+  padding-bottom: 13%;
+  margin-bottom: 50px;
+}
+
+.header-bg {
+  background-image: url(assets/boston-images/christian-water.jpg);
+}
+
+.intro h1 {
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.intro h5 {
+  text-transform: uppercase;
+  background-color: #f5f5f5;
+  padding: 10px;
+  color: #333;
+  display: inline-block;
+  font-size: 1.2rem;
+}
+
+.about .col {
+  margin-bottom: 24px;
+}
+
+.about h5 {
+  text-align: center;
+  text-transform: uppercase;
+  margin-bottom: 15px;
+}
+
+.about h6 {
+  text-align: center;
+  text-transform: uppercase;
+  margin-bottom: 45px;
+}
+
+.about hr {
+  width: 40px;
+  margin-bottom: 45px;
+}
+
+.about .card {
   text-align: center;
 }
 
-main {
-  flex: 1 0 auto;
+.about .card-action {
+  text-align: center;
 }
 
-h1 {
-  color: #ff2734;
-  font-weight: 300;
-}
-
-.about-me {
-  height: 900px;
-}
-
-.skills {
-  height: 500px;
-}
-
-.project {
+.projects img {
+  width: 33%;
+  display: inline-block;
   float: left;
-  height: 300px;
-  width: 300px;
+}
+
+.about .card img {
+  margin-bottom: 15px;
+}
+
+.projects .col {
+  margin-bottom: 24px;
+}
+
+.projects h5 {
+  text-align: center;
+  text-transform: uppercase;
+  margin-bottom: 15px;
+}
+
+.projects h6 {
+  text-align: center;
+  text-transform: uppercase;
+  margin-bottom: 45px;
+}
+
+.projects hr {
+  width: 40px;
+  margin-bottom: 45px;
+}
+
+.projects .projects-holder {
+  clear: both;
+  text-align: center;
+}
+
+.contact .col {
+  margin-bottom: 24px;
+}
+
+.skills h5 {
+  text-align: center;
+  text-transform: uppercase;
+  margin-bottom: 15px;
+}
+
+.skills h6 {
+  text-align: center;
+  text-transform: uppercase;
+  margin-bottom: 45px;
+}
+
+.skills hr {
+  width: 40px;
+  margin-bottom: 45px;
+}
+
+.skills .skills-holder {
+  padding-left: 40px;
+  text-align: left;
+}
+
+.skills .skills-holder h6 {
+  margin-bottom: 15px;
+  text-align: left;
+}
+
+.skills .skills-holder p {
+  margin-bottom: 30px;
+}
+
+.skill-box {
+  height: 128px;
+  width: 128px;
+}
+
+.skill-box .left-end {
+  margin-right: 42px;
 }
