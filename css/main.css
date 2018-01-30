@@ -17,3 +17,17 @@ h1 {
   color: #ff2734;
   font-weight: 300;
 }
+
+.about-me {
+  height: 900px;
+}
+
+.skills {
+  height: 500px;
+}
+
+.project {
+  float: left;
+  height: 300px;
+  width: 300px;
+}
