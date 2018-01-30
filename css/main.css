@@ -1,0 +1,19 @@
+body {
+  background: #ffe2ae;
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+}
+
+.page-head-title {
+  text-align: center;
+}
+
+main {
+  flex: 1 0 auto;
+}
+
+h1 {
+  color: #ff2734;
+  font-weight: 300;
+}
