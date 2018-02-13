@@ -20,58 +20,57 @@
   <body class="container-fluid">
 
     <header>
-      <nav class="teal darken-3">
-        <div class="container">
-          <div class="nav-wrapper">
-        </div>
-          <a href="#" class="brand-logo">signature</a>
-          <ul id="nav-mobile" class="right hide-on-med-and-down">
-            <li><a href="#skills">About Me</a></li>
-            <li><a href="#">Skills</a></li>
-            <li><a href="#">Projects</a></li>
-            <li><a href="#">Contact</a></li>
-          </ul>
-        </div>
-      </nav>
+      <div class="navbar-fixed">
+        <nav class="teal darken-3">
+          <div class="container">
+            <div class="nav-wrapper">
+              <a href="#" class="brand-logo">Will Bounas</a>
+              <ul id="nav-mobile" class="right hide-on-med-and-down">
+                <li><a href="#skills">About Me</a></li>
+                <li><a href="#">Skills</a></li>
+                <li><a href="#">Projects</a></li>
+                <li><a href="#">Contact</a></li>
+              </ul>
+            </div>
+          </div>
+        </nav>
+      </div>
     </header>
 
     <main>
 
-      <div class="intro teal darken-4 z-depth-1 header-bg">
+      <!-- <div class="intro teal darken-4 z-depth-1 header-bg">
         <h1 class="grey-text text-lighten-5">will bounas</h1>
         <h5 class="grey lighten-4 grey-text text-darken-1">full stack web developer</h5>
+      </div> -->
+
+      <div class="parallax-container">
+        <div class="parallax"><img src="assets/images/boston-images/masspike-night.jpg" /></div>
+        <div class="intro">
+          <h1 class="intro-logo grey-text text-lighten-5">will bounas</h1>
+          <h5 class="grey lighten-4 grey-text text-darken-1">full stack web developer</h5>
+        </div>
       </div>
 
       <div class="container about">
-        <h5>about me</h5>
+        <h2>about me</h2>
 
         <hr>
         <div class="row">
           <div class="col s12 m8 l8">
-            <h6>Story</h6>
-            <p>Lorem ipsum dolor sit amet, consectetur adipisicing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.</p>
-            <p>Lorem ipsum dolor sit amet, consectetur adipisicing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+            <h3>Story</h3>
+            <p>Full stack web developer with a passion for learning and an exacting attention to detail. As a former music educator, I am excited to contribute my unique problem-solving skills and team-oriented mindset to a web that I am hungry to make safer, faster, and better.</p>
+            <p>I’ve always had a passion for learning. As an educator, my greatest satisfaction is to empower another person to achieve their goals, and go beyond what they thought they were capable of. That’s why I decided to enroll at General Assembly in Boston. I wanted to find out what it takes to get started in web development. GA has empowered me to take my new-found skills and apply them to many unique problems and situations in both the real world, and on the web. Building 4 full-stack web applications challenged me to see problems in a new perspective, and utilize numerous technologies to turn my ideas into tangible products that can be used all over the world.</p>
           </div>
           <div class="col s12 m4 l4">
-            <h6>Profile</h6>
-            <div class="card blue-grey darken-1">
-              <div class="card-content white-text">
-                <img src="http://labs.qnimate.com/portfolio-materialize/images/profile.png" width="128" height="128">
-                <p>Lorem ipsum dolor sit amet, consectetur adipisicing elit, sed do eiusmod tempor incididunt ut labore.</p>
-              </div>
-              <div class="center-align">
-                <div class="card-action">
-                  <a href="#">Resume</a>
-                  <a href='#'>GitHub</a>
-                </div>
-              </div>
-            </div>
+            <br><br>
+            <img src="assets/images/slack.jpg" class="circle responsive-img">
           </div>
         </div>
       </div>
 
       <div class="container skills">
-        <h5>skills</h5>
+        <h2>skills</h2>
         <hr>
 
         <!-- first row of skills -->
@@ -175,7 +174,7 @@
           </div>
 
           <div class="col s2">
-            4
+            <img class="responsive-img ember" src="assets/images/ember.png" style="size: 300px;">
           </div>
 
           <div class="col s2">
@@ -192,7 +191,7 @@
       <div class="container projects">
 
         <!-- header -->
-        <h5>projects</h5>
+        <h2>projects</h2>
         <hr>
 
         <!-- all projects -->
@@ -211,7 +210,9 @@
               </div>
               <div class="card-reveal">
                 <span class="card-title grey-text text-darken-4">Tic-Tac-Toe<i class="material-icons right">close</i></span>
-                <p>Here is some more information about this product that is only revealed once clicked on.</p>
+                <p><b>Technologies Used:</b><br>
+                JavaScript, jQuery, AJAX, Bootstrap, HTML5/CSS3 with Sass</p>
+                <p>Responsive single page application based around Tic-Tac-Toe. Built to-spec with a given API, features include user authentication, retrieval of past game statistics, and an interesting fact generator!</p>
               </div>
             </div>
           </div>

@@ -1,5 +1,4 @@
-body,
-html {
+body:not(.parallax-container) {
   background-color: #ededed !important;
 }
 
@@ -17,6 +16,23 @@ html {
   padding-top: 13%;
   padding-bottom: 13%;
   margin-bottom: 50px;
+}
+
+.about {
+  text-align: center;
+}
+
+.intro-logo {
+  font-style: italic;
+}
+
+.about h3,
+p {
+  text-align: left;
+}
+
+.parallax {
+  position: static;
 }
 
 .header-bg {
@@ -80,6 +96,10 @@ html {
   margin-bottom: 24px;
 }
 
+.projects h2 {
+  text-align: center;
+}
+
 .projects h5 {
   text-align: center;
   text-transform: uppercase;
@@ -104,6 +124,10 @@ html {
 
 .contact .col {
   margin-bottom: 24px;
+}
+
+.skills h2 {
+  text-align: center;
 }
 
 .skills h5 {
@@ -144,4 +168,9 @@ html {
 
 .skill-box .left-end {
   margin-right: 42px;
+}
+
+.ember {
+  vertical-align: bottom;
+  margin-top: 30px;
 }
