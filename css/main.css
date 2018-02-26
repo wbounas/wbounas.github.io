@@ -53,8 +53,13 @@ p {
   font-size: 1.2rem;
 }
 
-.about .col {
-  margin-bottom: 24px;
+.flex-container {
+  display: flex;
+  align-items: center;
+}
+
+.profile-pic {
+  align-self: center;
 }
 
 .about h5 {
@@ -80,6 +85,11 @@ p {
 
 .about .card-action {
   text-align: center;
+}
+
+.resume-row {
+  background: #2f7;
+  display: inline;
 }
 
 .projects img {
@@ -173,4 +183,15 @@ p {
 .ember {
   vertical-align: bottom;
   margin-top: 30px;
+}
+
+@media only screen and (min-device-width: 414px) and (max-device-height: 736px) and (orientation: landscape) and (-webkit-device-pixel-ratio: 2) {
+  .flex-container {
+    display: block;
+    text-align: center;
+
+    .profile-pic {
+      width: 100%;
+    }
+  }
 }
