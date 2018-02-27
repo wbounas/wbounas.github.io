@@ -22,16 +22,16 @@
   <body class="container-fluid">
 
     <header>
-      <div class="navbar-fixed">
+      <div id="top" class="navbar-fixed scrollspy">
         <nav class="teal darken-3">
           <div class="container">
             <div class="nav-wrapper">
-              <a href="#" class="brand-logo nav-text">Will Bounas</a>
+              <a href="#top" class="brand-logo nav-text">Will Bounas</a>
               <ul id="nav-mobile" class="right hide-on-med-and-down nav-text">
-                <li><a href="#skills">About Me</a></li>
-                <li><a href="#">Skills</a></li>
-                <li><a href="#">Projects</a></li>
-                <li><a href="#">Contact</a></li>
+                <li><a href="#about-me">About Me</a></li>
+                <li><a href="#skills">Skills</a></li>
+                <li><a href="#projects">Projects</a></li>
+                <li><a href="#contact">Contact</a></li>
               </ul>
             </div>
           </div>
@@ -58,7 +58,7 @@
         <h2>about me</h2>
 
         <hr>
-        <div class="row flex-container">
+        <div id="about-me" class="row flex-container section scrollspy">
           <div class="col s12 m8 l8">
             <h3>Story</h3>
             <p>
@@ -77,12 +77,12 @@
         </div>
       </div>
 
-      <div class="container skills">
+      <div class="container skills section scrollspy">
         <h2>skills</h2>
         <hr>
 
         <!-- first row of skills -->
-        <div class="row center-align">
+        <div id="skills" class="row center-align section scrollspy">
 
           <div class="col s2">
             <!-- javascript svg icon -->
@@ -204,7 +204,7 @@
 
         <!-- all projects -->
         <!-- project row 1 -->
-        <div class="row">
+        <div id="projects" class="row section scrollspy">
           <!-- project 1 -->
           <div class="col s12 m6 l6 project-holder">
             <div class="card">
@@ -301,7 +301,7 @@
     </main>
 
     <footer class="page-footer teal">
-      <div class="container">
+      <div id="contact" class="container section scrollspy">
         <div class="row">
           <div class="col l6 s12">
             <h5 class="white-text">Footer Content</h5>
