@@ -3,11 +3,23 @@ body:not(.parallax-container) {
 }
 
 .img {
-  vertical-align: bottom;
+  vertical-align: text-bottom;
 }
 
 .nav-text {
   font-family: 'Source Code Pro', monospace;
+}
+
+.black-text {
+  color: #000;
+}
+
+.download-text {
+  font-size: 12px;
+}
+
+a:hover:not(.brand-logo) {
+  text-decoration: underline;
 }
 
 .devicon-git-plain {
