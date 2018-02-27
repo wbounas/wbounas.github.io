@@ -2,6 +2,14 @@ body:not(.parallax-container) {
   background-color: #ededed !important;
 }
 
+.img {
+  vertical-align: bottom;
+}
+
+.nav-text {
+  font-family: 'Source Code Pro', monospace;
+}
+
 .devicon-git-plain {
   max-width: 2em;
 }
