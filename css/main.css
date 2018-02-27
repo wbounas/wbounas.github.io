@@ -6,6 +6,10 @@ body:not(.parallax-container) {
   vertical-align: text-bottom;
 }
 
+nav {
+  opacity: 0.9;
+}
+
 .nav-text {
   font-family: 'Source Code Pro', monospace;
 }
@@ -211,7 +215,7 @@ p {
     text-align: center;
 
     .profile-pic {
-      width: 100%;
+      /* display: block; */
     }
   }
 }
