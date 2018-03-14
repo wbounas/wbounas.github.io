@@ -220,6 +220,7 @@ p {
 .footer-img {
   filter: alpha(opacity=50); /* For IE8 and earlier */
   opacity: 0.75;
+  color: #ede;
 }
 
 .footer-img:hover {
