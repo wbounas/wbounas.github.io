@@ -218,14 +218,24 @@ p {
 }
 
 .footer-img {
+  color: #ede;
   filter: alpha(opacity=50); /* For IE8 and earlier */
   opacity: 0.75;
-  color: #ede;
+  vertical-align: text-bottom;
 }
 
 .footer-img:hover {
   filter: alpha(opacity=100); /* For IE8 and earlier */
   opacity: 1;
+}
+
+#contact-title {
+  border-bottom: 1px solid #fff;
+  letter-spacing: 3px;
+  margin: 0 auto;
+  margin-bottom: 25px;
+  padding-bottom: 3px;
+  width: fit-content;
 }
 
 @media only screen and (min-device-width: 414px) and (max-device-height: 736px) and (orientation: landscape) and (-webkit-device-pixel-ratio: 2) {
