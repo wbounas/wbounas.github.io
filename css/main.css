@@ -218,7 +218,7 @@ p {
 }
 
 .footer-img {
-  color: #ede;
+  color: #ededed;
   filter: alpha(opacity=50); /* For IE8 and earlier */
   opacity: 0.75;
   vertical-align: text-bottom;
