@@ -213,6 +213,20 @@ p {
   padding-top: 0;
 }
 
+#contact {
+  padding-bottom: 0;
+}
+
+.footer-img {
+  filter: alpha(opacity=50); /* For IE8 and earlier */
+  opacity: 0.75;
+}
+
+.footer-img:hover {
+  filter: alpha(opacity=100); /* For IE8 and earlier */
+  opacity: 1;
+}
+
 @media only screen and (min-device-width: 414px) and (max-device-height: 736px) and (orientation: landscape) and (-webkit-device-pixel-ratio: 2) {
   .flex-container {
     display: block;
