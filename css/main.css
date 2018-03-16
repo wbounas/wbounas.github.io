@@ -217,6 +217,10 @@ p {
   padding-bottom: 0;
 }
 
+.footer-a {
+  color: #ededed;
+}
+
 .footer-img {
   color: #ededed;
   filter: alpha(opacity=50); /* For IE8 and earlier */
