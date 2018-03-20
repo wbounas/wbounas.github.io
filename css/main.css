@@ -50,6 +50,11 @@ a:hover:not(.brand-logo) {
   font-style: italic;
 }
 
+#resume-btn {
+  color: black;
+  vertical-align: bottom;
+}
+
 .about h3,
 p {
   text-align: left;
