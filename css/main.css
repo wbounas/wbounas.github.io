@@ -50,6 +50,12 @@ a:hover:not(.brand-logo) {
   font-style: italic;
 }
 
+.intro-parent {
+  top: 0;
+  bottom: 0;
+  margin: auto;
+}
+
 #resume-btn {
   color: black;
   vertical-align: bottom;
