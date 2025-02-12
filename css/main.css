@@ -51,9 +51,10 @@ a:hover:not(.brand-logo) {
 }
 
 .intro-parent {
-  top: 0;
-  bottom: 0;
-  margin: auto;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
 }
 
 #resume-btn {
