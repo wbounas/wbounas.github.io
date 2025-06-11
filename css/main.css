@@ -37,7 +37,7 @@ a:hover:not(.brand-logo) {
 
 .intro {
   text-align: center;
-  padding-top: 13%;
+  padding-top: 8%;
   padding-bottom: 13%;
   margin-bottom: 50px;
 }
@@ -81,7 +81,7 @@ p {
 
 .intro h5 {
   text-transform: uppercase;
-  background-color: #f5f5f5;
+  background-color: #29766B;
   padding: 10px;
   color: #333;
   display: inline-block;
