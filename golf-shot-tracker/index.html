@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Golf Shot Mapper</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="description" content="Map every shot of a round of golf using course yardages and GPS, then review your scorecard and club distances.">
+<meta name="theme-color" content="#1b5e3a">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon.svg">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Shot Mapper">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="app-header">
+  <div class="app-header-title">
+    <span class="flag">&#9971;</span>
+    <span>Golf Shot Mapper</span>
+  </div>
+  <button class="icon-btn" data-action="nav" data-view="clubs" title="Manage clubs" aria-label="Manage clubs">&#9881;</button>
+</header>
+
+<main id="app" role="main"></main>
+
+<div id="modal-root"></div>
+
+<nav class="bottom-nav" id="bottom-nav">
+  <button class="nav-btn" data-action="nav" data-view="play">
+    <span class="nav-icon">&#9971;</span><span>Play</span>
+  </button>
+  <button class="nav-btn" data-action="nav" data-view="scorecard">
+    <span class="nav-icon">&#128220;</span><span>Scorecard</span>
+  </button>
+  <button class="nav-btn" data-action="nav" data-view="courses">
+    <span class="nav-icon">&#128506;&#65039;</span><span>Courses</span>
+  </button>
+  <button class="nav-btn" data-action="nav" data-view="history">
+    <span class="nav-icon">&#128197;</span><span>History</span>
+  </button>
+</nav>
+
+<script src="js/app.js"></script>
+</body>
+</html>

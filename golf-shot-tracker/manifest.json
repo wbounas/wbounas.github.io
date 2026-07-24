@@ -1,0 +1,14 @@
+{
+  "name": "Golf Shot Mapper",
+  "short_name": "ShotMapper",
+  "description": "Map every shot of a round of golf using course yardages and GPS, then review your scorecard and club distances.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#101512",
+  "theme_color": "#1b5e3a",
+  "icons": [
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
