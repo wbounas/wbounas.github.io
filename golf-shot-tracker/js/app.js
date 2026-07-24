@@ -1,8 +1,9 @@
 (function () {
   'use strict';
 
-  var STORAGE_KEY = 'golfShotMapper.v1';
+  var STORAGE_KEY = 'golfShotMapper.v2';
   var YARDS_PER_METER = 1.0936133;
+  var TEE_COLORS = ['#1b5e3a', '#1565c0', '#c0392b', '#e08e0b', '#6a3fa0', '#00838f'];
 
   var DEFAULT_CLUBS = [
     'Driver', '3 Wood', '5 Wood', '3 Hybrid',
@@ -14,11 +15,12 @@
   var ui = {
     view: 'play',
     startCourseId: null,
-    shotModal: null,
+    shotSheet: null,
     courseEditor: null,
     scorecardRoundId: null,
     lastClub: null,
-    message: null
+    message: null,
+    search: { query: '', loading: false, searched: false, results: [], error: '' }
   };
 
   // ---------------- storage ----------------
@@ -73,9 +75,7 @@
         function (pos) {
           resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude, accuracy: pos.coords.accuracy });
         },
-        function (err) {
-          reject(new Error(err.message || 'Location request failed.'));
-        },
+        function (err) { reject(new Error(err.message || 'Location request failed.')); },
         { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
       );
     });
@@ -83,51 +83,44 @@
 
   // ---------------- data helpers ----------------
 
-  function findCourse(id) {
-    return state.courses.find(function (c) { return c.id === id; });
-  }
-  function findTee(course, teeId) {
-    return course.tees.find(function (t) { return t.id === teeId; });
-  }
+  function findCourse(id) { return state.courses.find(function (c) { return c.id === id; }); }
   function activeRound() {
     return state.activeRoundId ? state.rounds.find(function (r) { return r.id === state.activeRoundId; }) : null;
   }
-  function currentHoleObj(round) {
-    return round.holes[round.currentHole - 1];
-  }
-  function teeTotalYards(tee) {
-    return tee.holes.reduce(function (s, h) { return s + (h.yards || 0); }, 0);
-  }
-  function makeTee(name, numHoles) {
-    var holes = [];
-    for (var i = 1; i <= numHoles; i++) {
-      holes.push({ number: i, par: 4, yards: 0, teeLat: null, teeLon: null, greenLat: null, greenLon: null });
+  function currentHoleObj(round) { return round.holes[round.currentHole - 1]; }
+
+  function makeBlankHoles(n) {
+    var arr = [];
+    for (var i = 1; i <= n; i++) {
+      arr.push({ number: i, par: 4, greenLat: null, greenLon: null, defaultTeeLat: null, defaultTeeLon: null, teeOverrides: {} });
     }
-    return { id: uid(), name: name, holes: holes };
+    return arr;
   }
 
-  function lastReferencePoint(hole) {
-    for (var i = hole.shots.length - 1; i >= 0; i--) {
-      if (hole.shots[i].lat != null) return { lat: hole.shots[i].lat, lon: hole.shots[i].lon };
-    }
+  function getTeePoint(course, hole, teeSetId) {
+    var ov = hole.teeOverrides && hole.teeOverrides[teeSetId];
+    if (ov) return ov;
+    if (hole.defaultTeeLat != null) return { lat: hole.defaultTeeLat, lon: hole.defaultTeeLon };
+    return null;
+  }
+
+  function getTeeYards(course, hole, teeSetId) {
+    var tp = getTeePoint(course, hole, teeSetId);
+    if (!tp || hole.greenLat == null) return null;
+    return Math.round(distanceYards(tp.lat, tp.lon, hole.greenLat, hole.greenLon));
+  }
+
+  function lastPlayPoint(hole) {
+    if (hole.shots.length) return hole.shots[hole.shots.length - 1];
     if (hole.teeLat != null) return { lat: hole.teeLat, lon: hole.teeLon };
     return null;
   }
 
-  function cumulativeDistance(hole) {
-    return hole.shots.reduce(function (sum, s) { return sum + (s.distance || 0); }, 0);
-  }
-
   function remainingYards(hole) {
-    var shots = hole.shots;
-    if (shots.length) {
-      var last = shots[shots.length - 1];
-      if (last.lat != null && hole.greenLat != null && hole.greenLon != null) {
-        return Math.max(0, Math.round(distanceYards(last.lat, last.lon, hole.greenLat, hole.greenLon)));
-      }
-    }
-    var used = cumulativeDistance(hole);
-    return Math.max(0, Math.round((hole.yards || 0) - used));
+    if (hole.greenLat == null) return null;
+    var from = lastPlayPoint(hole);
+    if (!from) return null;
+    return Math.max(0, Math.round(distanceYards(from.lat, from.lon, hole.greenLat, hole.greenLon)));
   }
 
   function scoreToParClass(diff) {
@@ -154,10 +147,8 @@
       var arr = map[club];
       var avg = arr.reduce(function (a, b) { return a + b; }, 0) / arr.length;
       return {
-        club: club,
-        avg: Math.round(avg),
-        min: Math.round(Math.min.apply(null, arr)),
-        max: Math.round(Math.max.apply(null, arr)),
+        club: club, avg: Math.round(avg),
+        min: Math.round(Math.min.apply(null, arr)), max: Math.round(Math.max.apply(null, arr)),
         count: arr.length
       };
     }).sort(function (a, b) { return b.avg - a.avg; });
@@ -174,27 +165,24 @@
     ui.message = { text: text, type: type || 'info' };
     render();
     clearTimeout(flash._t);
-    flash._t = setTimeout(function () { ui.message = null; render(); }, 3500);
+    flash._t = setTimeout(function () { ui.message = null; render(); }, 4000);
   }
 
   // ---------------- round lifecycle ----------------
 
-  function startRound(courseId, teeId) {
+  function startRound(courseId, teeSetId) {
     var course = findCourse(courseId);
-    var tee = findTee(course, teeId);
+    var teeSet = course.teeSets.find(function (t) { return t.id === teeSetId; });
     var round = {
-      id: uid(),
-      courseId: course.id,
-      courseName: course.name,
-      teeId: tee.id,
-      teeName: tee.name,
-      date: new Date().toISOString(),
-      currentHole: 1,
-      finished: false,
-      holes: tee.holes.map(function (h) {
+      id: uid(), courseId: course.id, courseName: course.name,
+      teeSetId: teeSet.id, teeSetName: teeSet.name,
+      date: new Date().toISOString(), currentHole: 1, finished: false,
+      holes: course.holes.map(function (h) {
+        var tp = getTeePoint(course, h, teeSetId);
         return {
-          number: h.number, par: h.par, yards: h.yards,
-          teeLat: h.teeLat, teeLon: h.teeLon, greenLat: h.greenLat, greenLon: h.greenLon,
+          number: h.number, par: h.par,
+          teeLat: tp ? tp.lat : null, teeLon: tp ? tp.lon : null,
+          greenLat: h.greenLat, greenLon: h.greenLon,
           shots: [], score: null
         };
       })
@@ -202,6 +190,181 @@
     state.rounds.push(round);
     state.activeRoundId = round.id;
     saveState();
+  }
+
+  // ---------------- Leaflet map lifecycle ----------------
+  // A single persistent map + DOM node survive across renders. Since render()
+  // rebuilds view HTML from a string, the map's placeholder slot gets replaced
+  // each time -- so instead of destroying/recreating the map, we reparent the
+  // same live element into the fresh slot (appendChild moves a node without
+  // destroying it or its listeners) and just invalidateSize() + redraw layers.
+
+  var mapEl = null;
+  var leafletMap = null;
+  var mapLayers = {};
+  var lastFitKey = null;
+
+  function pinIcon(color, label, size) {
+    size = size || 26;
+    return L.divIcon({
+      className: 'golf-pin',
+      html: '<div class="golf-pin-inner" style="background:' + color + ';width:' + size + 'px;height:' + size + 'px;line-height:' + size + 'px">' + (label || '') + '</div>',
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2]
+    });
+  }
+  function greenIcon() {
+    return L.divIcon({ className: 'golf-pin-flag', html: '&#9971;', iconSize: [26, 26], iconAnchor: [8, 24] });
+  }
+  function teeIcon(color) { return pinIcon(color, 'T', 22); }
+  function shotIcon(n) { return pinIcon('#2c3e50', String(n), 24); }
+
+  function ensureMap() {
+    if (leafletMap) return leafletMap;
+    mapEl = document.createElement('div');
+    mapEl.style.width = '100%';
+    mapEl.style.height = '100%';
+    leafletMap = L.map(mapEl, { tap: true });
+    var osmTiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 21, attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(leafletMap);
+    var satTiles = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 20, attribution: 'Tiles &copy; Esri'
+    });
+    L.control.layers({ 'Map': osmTiles, 'Satellite': satTiles }, {}, { position: 'topright' }).addTo(leafletMap);
+    leafletMap.setView([39.8283, -98.5795], 4);
+    leafletMap.on('click', handleMapClick);
+    return leafletMap;
+  }
+
+  function mountMap(slotId) {
+    var slot = document.getElementById(slotId);
+    if (!slot) return null;
+    ensureMap();
+    slot.appendChild(mapEl);
+    leafletMap.invalidateSize();
+    return leafletMap;
+  }
+
+  function clearMapLayers() {
+    var existing = mapLayers.current || [];
+    existing.forEach(function (l) { leafletMap.removeLayer(l); });
+    mapLayers.current = [];
+  }
+
+  function handleMapClick(e) {
+    if (ui.view === 'play') {
+      var round = activeRound();
+      if (!round || round.finished) return;
+      var hole = currentHoleObj(round);
+      if (hole.score != null || hole.teeLat == null) return;
+      if (ui.shotSheet) return;
+      ui.shotSheet = { lat: e.latlng.lat, lon: e.latlng.lng, club: ui.lastClub || state.clubs[0], error: '', locating: false };
+      render();
+    } else if (ui.view === 'courseEditor') {
+      var ed = ui.courseEditor;
+      var h = ed.course.holes[ed.currentHole - 1];
+      if (ed.mode.type === 'green') {
+        h.greenLat = e.latlng.lat; h.greenLon = e.latlng.lng;
+      } else {
+        h.teeOverrides[ed.mode.teeSetId] = { lat: e.latlng.lat, lon: e.latlng.lng };
+      }
+      render();
+    }
+  }
+
+  function drawPlayLayers() {
+    var round = activeRound();
+    if (!round || round.finished) return;
+    var hole = currentHoleObj(round);
+    clearMapLayers();
+    var layers = [];
+
+    if (hole.teeLat != null) {
+      layers.push(L.marker([hole.teeLat, hole.teeLon], { icon: teeIcon('#1b5e3a') }).addTo(leafletMap).bindTooltip('Tee'));
+    }
+    if (hole.greenLat != null) {
+      layers.push(L.marker([hole.greenLat, hole.greenLon], { icon: greenIcon() }).addTo(leafletMap).bindTooltip('Green'));
+    }
+    var linePts = [];
+    if (hole.teeLat != null) linePts.push([hole.teeLat, hole.teeLon]);
+    hole.shots.forEach(function (s, idx) {
+      layers.push(L.marker([s.lat, s.lon], { icon: shotIcon(idx + 1) }).addTo(leafletMap)
+        .bindTooltip(s.club + ' &middot; ' + Math.round(s.distance) + ' yds'));
+      linePts.push([s.lat, s.lon]);
+    });
+    if (linePts.length > 1) {
+      layers.push(L.polyline(linePts, { color: '#1b5e3a', weight: 3 }).addTo(leafletMap));
+    }
+    if (linePts.length && hole.greenLat != null) {
+      var lastPt = linePts[linePts.length - 1];
+      layers.push(L.polyline([lastPt, [hole.greenLat, hole.greenLon]], { color: '#1b5e3a', weight: 2, dashArray: '6,8', opacity: 0.7 }).addTo(leafletMap));
+    }
+    mapLayers.current = layers;
+
+    var key = 'play-' + round.id + '-' + hole.number;
+    if (key !== lastFitKey) {
+      var pts = linePts.slice();
+      if (hole.greenLat != null) pts.push([hole.greenLat, hole.greenLon]);
+      if (pts.length === 1) leafletMap.setView(pts[0], 17);
+      else if (pts.length > 1) leafletMap.fitBounds(pts, { padding: [40, 40] });
+      lastFitKey = key;
+    }
+  }
+
+  function drawEditorLayers() {
+    var ed = ui.courseEditor;
+    if (!ed) return;
+    var course = ed.course;
+    var hole = course.holes[ed.currentHole - 1];
+    clearMapLayers();
+    var layers = [];
+
+    if (course.boundary && course.boundary.length > 2) {
+      layers.push(L.polygon(course.boundary, { color: '#1b5e3a', weight: 2, fillOpacity: 0.03 }).addTo(leafletMap));
+    }
+    (course.fairwayRings || []).forEach(function (ring) {
+      layers.push(L.polygon(ring, { color: '#7cb87c', weight: 1, fillOpacity: 0.25, stroke: false }).addTo(leafletMap));
+    });
+    (course.bunkerRings || []).forEach(function (ring) {
+      layers.push(L.polygon(ring, { color: '#e8d9a0', weight: 1, fillOpacity: 0.4, stroke: false }).addTo(leafletMap));
+    });
+
+    if (hole.greenLat != null) {
+      var greenMarker = L.marker([hole.greenLat, hole.greenLon], { icon: greenIcon(), draggable: true })
+        .addTo(leafletMap).bindTooltip('Green');
+      greenMarker.on('dragend', function (ev) {
+        var p = ev.target.getLatLng();
+        hole.greenLat = p.lat; hole.greenLon = p.lng;
+        render();
+      });
+      layers.push(greenMarker);
+    }
+    course.teeSets.forEach(function (t) {
+      var tp = getTeePoint(course, hole, t.id);
+      if (!tp) return;
+      var teeMarker = L.marker([tp.lat, tp.lon], { icon: teeIcon(t.color), draggable: true })
+        .addTo(leafletMap).bindTooltip(t.name + ' tee');
+      teeMarker.on('dragend', function (ev) {
+        var p = ev.target.getLatLng();
+        hole.teeOverrides[t.id] = { lat: p.lat, lon: p.lng };
+        render();
+      });
+      layers.push(teeMarker);
+    });
+    mapLayers.current = layers;
+
+    var key = 'editor-' + course.id + '-' + ed.currentHole;
+    if (key !== lastFitKey) {
+      var pts = [];
+      if (hole.greenLat != null) pts.push([hole.greenLat, hole.greenLon]);
+      course.teeSets.forEach(function (t) { var tp = getTeePoint(course, hole, t.id); if (tp) pts.push([tp.lat, tp.lon]); });
+      if (pts.length >= 2) leafletMap.fitBounds(pts, { padding: [50, 50] });
+      else if (pts.length === 1) leafletMap.setView(pts[0], 17);
+      else if (course.boundary && course.boundary.length) leafletMap.fitBounds(course.boundary, { padding: [20, 20] });
+      else leafletMap.setView([course.lat, course.lon], 16);
+      lastFitKey = key;
+    }
   }
 
   // ---------------- render: root ----------------
@@ -225,6 +388,11 @@
     }
     app.innerHTML = banner + html;
     renderModal();
+    if (document.getElementById('map-slot')) {
+      mountMap('map-slot');
+      if (ui.view === 'courseEditor') drawEditorLayers();
+      else if (ui.view === 'play') drawPlayLayers();
+    }
     updateNavHighlight();
   }
 
@@ -246,9 +414,8 @@
     var remaining = remainingYards(hole);
     var totalHoles = round.holes.length;
     var isComplete = hole.score != null;
-    var usingGpsRemaining = hole.shots.length &&
-      hole.shots[hole.shots.length - 1].lat != null &&
-      hole.greenLat != null;
+    var hasTee = hole.teeLat != null;
+    var hasGreen = hole.greenLat != null;
 
     var dots = round.holes.map(function (h, i) {
       var cls = 'hole-dot' + (i + 1 === round.currentHole ? ' current' : '') + (h.score != null ? ' done' : '');
@@ -256,70 +423,66 @@
     }).join('');
 
     var shotsHtml = hole.shots.map(function (s, idx) {
-      return '<div class="shot-row">' +
-        '<div class="shot-badge">' + (idx + 1) + '</div>' +
-        '<div><div class="shot-club">' + escapeHtml(s.club) + '</div>' +
-        '<div class="shot-dist">' + Math.round(s.distance) + ' yds &middot; ' + (s.method === 'gps' ? 'GPS' : 'manual') + '</div></div>' +
+      return '<div class="shot-row"><div class="shot-badge">' + (idx + 1) + '</div>' +
+        '<div><div class="shot-club">' + escapeHtml(s.club) + '</div><div class="shot-dist">' + Math.round(s.distance) + ' yds</div></div>' +
         '<div class="spacer"></div>' +
-        '<button class="shot-remove" data-action="remove-shot" data-hole="' + hole.number + '" data-shot="' + s.id + '" aria-label="Remove shot">&#10005;</button>' +
-        '</div>';
-    }).join('') || '<p class="hole-meta">No shots logged yet for this hole.</p>';
+        '<button class="shot-remove" data-action="remove-shot" data-shot="' + s.id + '" aria-label="Remove shot">&#10005;</button></div>';
+    }).join('') || '<p class="hole-meta">No shots logged yet. Tap the map where your ball landed.</p>';
 
-    var startPointBtn = '';
-    if (!hole.shots.length && hole.teeLat == null) {
-      startPointBtn = '<button class="btn secondary small" data-action="mark-tee-gps">&#128205; Mark tee location (GPS)</button>';
+    var missingDataNote = '';
+    if (!hasTee || !hasGreen) {
+      missingDataNote = '<div class="card"><strong>This hole needs mapping</strong>' +
+        '<p class="hole-meta">' + (!hasTee ? 'No tee location for ' + escapeHtml(round.teeSetName) + ' tees. ' : '') + (!hasGreen ? 'No green location. ' : '') +
+        'Place the missing pins in Courses &rarr; Edit Map.</p>' +
+        '<button class="btn secondary small" data-action="edit-active-course">Edit Map</button></div>';
     }
 
     return '' +
       '<div class="row between">' +
       '<button class="hole-nav-arrow" data-action="prev-hole" ' + (round.currentHole <= 1 ? 'disabled' : '') + '>&#8249;</button>' +
       '<div style="text-align:center"><div style="font-weight:700">Hole ' + hole.number + ' of ' + totalHoles + '</div>' +
-      '<div class="hole-meta">Par ' + hole.par + ' &middot; ' + hole.yards + ' yds &middot; ' + escapeHtml(round.teeName) + ' tees</div></div>' +
+      '<div class="hole-meta">Par ' + hole.par + ' &middot; ' + escapeHtml(round.teeSetName) + ' tees</div></div>' +
       '<button class="hole-nav-arrow" data-action="next-hole" ' + (round.currentHole >= totalHoles ? 'disabled' : '') + '>&#8250;</button>' +
       '</div>' +
       '<div class="hole-strip">' + dots + '</div>' +
-      '<div class="remaining-box">' +
-      '<div class="num">' + remaining + '</div>' +
-      '<div class="unit">yds remaining to green' + (usingGpsRemaining ? ' (GPS)' : '') + '</div>' +
-      '</div>' +
-      (startPointBtn ? '<div class="row" style="margin-bottom:10px">' + startPointBtn + '</div>' : '') +
+      missingDataNote +
+      '<div class="remaining-box"><div class="num">' + (remaining != null ? remaining : '&mdash;') + '</div><div class="unit">yds remaining to green</div></div>' +
+      '<div class="row between" style="margin-bottom:8px"><span class="hole-meta">' + (isComplete ? 'Hole complete' : 'Tap the map where your shot landed') + '</span>' +
+      '<button class="btn ghost small" data-action="recenter-map">&#127919; Recenter</button></div>' +
+      '<div id="map-slot" style="height:320px;border-radius:14px;overflow:hidden;margin-bottom:12px"></div>' +
       '<div class="section-title">Shots</div>' +
       '<div class="shot-list">' + shotsHtml + '</div>' +
       (isComplete ?
         '<div class="card"><div class="row between"><div><strong>Hole complete</strong><div class="hole-meta">Score: ' + hole.score + '</div></div>' +
         '<button class="btn secondary small" data-action="reopen-hole">Edit</button></div></div>'
         :
-        '<button class="btn block" data-action="open-shot-modal">+ Log Shot</button>' +
-        (hole.shots.length ? '<button class="btn secondary block" style="margin-top:8px" data-action="finish-hole">&#127937; Holed Out / Finish Hole</button>' : '')
+        '<button class="btn secondary block" data-action="open-shot-modal" ' + (hasTee ? '' : 'disabled') + '>+ Log Shot (use my location)</button>' +
+        (hole.shots.length ? '<button class="btn block" style="margin-top:8px" data-action="finish-hole">&#127937; Holed Out / Finish Hole</button>' : '')
       ) +
-      (round.currentHole >= totalHoles && isComplete ?
-        '<button class="btn block" style="margin-top:14px" data-action="finish-round">Finish Round</button>' : '') +
+      (round.currentHole >= totalHoles && isComplete ? '<button class="btn block" style="margin-top:14px" data-action="finish-round">Finish Round</button>' : '') +
       '<button class="btn ghost block" style="margin-top:10px" data-action="finish-round">End round now</button>';
   }
 
   function renderStartRound() {
     if (!state.courses.length) {
       return '<div class="empty-state"><div class="big">&#9971;</div><h3>No courses yet</h3>' +
-        '<p>Add a course with its tee-to-green yardages first, then start a round here.</p></div>' +
-        '<button class="btn block" data-action="nav" data-view="courses">Add a Course</button>';
+        '<p>Search for a real course in the Courses tab, then come back here to start a round.</p></div>' +
+        '<button class="btn block" data-action="nav" data-view="courses">Find a Course</button>';
     }
     var selectedCourseId = (ui.startCourseId && findCourse(ui.startCourseId)) ? ui.startCourseId : state.courses[0].id;
     var course = findCourse(selectedCourseId);
     var courseOptions = state.courses.map(function (c) {
       return '<option value="' + c.id + '"' + (c.id === selectedCourseId ? ' selected' : '') + '>' + escapeHtml(c.name) + '</option>';
     }).join('');
-    var teeOptions = course.tees.map(function (t) {
-      return '<option value="' + t.id + '">' + escapeHtml(t.name) + ' (' + teeTotalYards(t) + ' yds)</option>';
+    var teeOptions = course.teeSets.map(function (t) {
+      return '<option value="' + t.id + '">' + escapeHtml(t.name) + '</option>';
     }).join('');
     return '' +
       '<div class="card">' +
       '<h3>Start a Round</h3>' +
       '<div class="field"><label>Course</label><select data-action="select-start-course">' + courseOptions + '</select></div>' +
-      (course.tees.length ?
-        '<div class="field"><label>Tees</label><select id="start-tee-select">' + teeOptions + '</select></div>' +
-        '<button class="btn block" data-action="start-round" data-course="' + course.id + '">Start Round</button>'
-        : '<p class="hint">This course has no tees set up yet. Edit it in Courses to add yardages.</p>'
-      ) +
+      '<div class="field"><label>Tees</label><select id="start-tee-select">' + teeOptions + '</select></div>' +
+      '<button class="btn block" data-action="start-round" data-course="' + course.id + '">Start Round</button>' +
       '</div>';
   }
 
@@ -336,16 +499,14 @@
         '<button class="btn block" data-action="nav" data-view="play">Go to Play</button>';
     }
 
-    var totalPar = 0, totalYards = 0, totalScore = 0, scoredHoles = 0, scoredPar = 0;
+    var totalPar = 0, totalScore = 0, scoredHoles = 0, scoredPar = 0;
     var rows = round.holes.map(function (h) {
       totalPar += h.par;
-      totalYards += h.yards;
       if (h.score != null) { totalScore += h.score; scoredHoles++; scoredPar += h.par; }
       var diff = h.score != null ? (h.score - h.par) : null;
       return '<tr>' +
         '<td class="hole-cell">' + h.number + '</td>' +
         '<td>' + h.par + '</td>' +
-        '<td>' + h.yards + '</td>' +
         '<td><input class="score-input" type="number" min="1" inputmode="numeric" value="' + (h.score != null ? h.score : '') + '" ' +
         'data-action="edit-score" data-hole="' + h.number + '" ' + (round.finished ? 'disabled' : '') + '></td>' +
         '<td>' + (diff != null ? '<span class="to-par ' + scoreToParClass(diff) + '">' + formatToPar(diff) + '</span>' : '&mdash;') + '</td>' +
@@ -357,11 +518,11 @@
     return '' +
       '<div class="card">' +
       '<h3>' + escapeHtml(round.courseName) + '</h3>' +
-      '<p class="hole-meta">' + escapeHtml(round.teeName) + ' tees &middot; ' + new Date(round.date).toLocaleDateString() +
+      '<p class="hole-meta">' + escapeHtml(round.teeSetName) + ' tees &middot; ' + new Date(round.date).toLocaleDateString() +
       (round.finished ? ' &middot; Final' : ' &middot; In progress') + '</p>' +
-      '<div style="overflow-x:auto"><table class="scorecard-table"><thead><tr><th>Hole</th><th>Par</th><th>Yds</th><th>Score</th><th>+/-</th></tr></thead>' +
+      '<div style="overflow-x:auto"><table class="scorecard-table"><thead><tr><th>Hole</th><th>Par</th><th>Score</th><th>+/-</th></tr></thead>' +
       '<tbody>' + rows + '</tbody>' +
-      '<tfoot><tr><td class="hole-cell">Total</td><td>' + totalPar + '</td><td>' + totalYards + '</td>' +
+      '<tfoot><tr><td class="hole-cell">Total</td><td>' + totalPar + '</td>' +
       '<td>' + (scoredHoles ? totalScore : '&mdash;') + '</td>' +
       '<td>' + (scoredHoles ? '<span class="to-par ' + scoreToParClass(overallDiff) + '">' + formatToPar(overallDiff) + '</span>' : '&mdash;') + '</td></tr></tfoot>' +
       '</table></div>' +
@@ -390,69 +551,99 @@
   // ---------------- render: courses ----------------
 
   function renderCourses() {
-    if (!state.courses.length) {
-      return '<div class="empty-state"><div class="big">&#127967;</div><h3>No courses yet</h3>' +
-        '<p>Add the course you are about to play using tee-to-green yardages from the scorecard.</p></div>' +
-        '<button class="btn block" data-action="new-course">+ Add Course</button>';
+    var search = ui.search;
+    var html = '<div class="card">' +
+      '<h3>Find a Course</h3>' +
+      '<div class="row"><input type="text" id="course-search-input" placeholder="Zip code, city, or course name" value="' + escapeAttr(search.query) + '">' +
+      '<button class="btn" data-action="run-course-search">Search</button></div>' +
+      (search.loading ? '<p class="hint">Searching OpenStreetMap&hellip;</p>' : '') +
+      (search.error ? '<div class="gps-status err">' + escapeHtml(search.error) + '</div>' : '') +
+      '</div>';
+
+    if (search.results.length) {
+      html += '<div class="section-title">Results</div>' + search.results.map(function (r, i) {
+        return '<div class="card course-card" data-action="select-search-result" data-index="' + i + '">' +
+          '<div><div style="font-weight:700">' + escapeHtml(r.name) + '</div>' +
+          '<div class="meta">' + (r.address ? escapeHtml(r.address) + (r.distanceMiles != null ? ' &middot; ' : '') : '') +
+          (r.distanceMiles != null ? r.distanceMiles.toFixed(1) + ' mi away' : '') + '</div></div>' +
+          '<div class="btn secondary small">Load</div>' +
+          '</div>';
+      }).join('');
+    } else if (search.searched && !search.loading) {
+      html += '<p class="hint">No golf courses found nearby. Try a broader search, like just the city or state.</p>';
     }
-    var cards = state.courses.map(function (c) {
-      return '<div class="card course-card">' +
-        '<div><div style="font-weight:700">' + escapeHtml(c.name) + '</div>' +
-        '<div class="meta">' + c.tees.length + ' tee' + (c.tees.length !== 1 ? 's' : '') + ' &middot; ' + c.numHoles + ' holes</div></div>' +
-        '<div class="row">' +
-        '<button class="btn secondary small" data-action="edit-course" data-course="' + c.id + '">Edit</button>' +
-        '<button class="btn danger ghost small" data-action="delete-course" data-course="' + c.id + '">Delete</button>' +
-        '</div></div>';
-    }).join('');
-    return cards + '<button class="btn block" data-action="new-course">+ Add Course</button>';
+
+    html += '<div class="section-title" style="margin-top:18px">My Saved Courses</div>';
+    if (!state.courses.length) {
+      html += '<p class="hint">Courses you load will appear here, ready to play.</p>';
+    } else {
+      html += state.courses.map(function (c) {
+        var mappedHoles = c.holes.filter(function (h) { return h.greenLat != null; }).length;
+        return '<div class="card course-card">' +
+          '<div><div style="font-weight:700">' + escapeHtml(c.name) + '</div>' +
+          '<div class="meta">' + mappedHoles + '/' + c.holes.length + ' holes mapped &middot; ' + c.teeSets.length + ' tee set' + (c.teeSets.length !== 1 ? 's' : '') + '</div></div>' +
+          '<div class="row">' +
+          '<button class="btn secondary small" data-action="open-saved-course" data-course="' + c.id + '">Edit Map</button>' +
+          '<button class="btn danger ghost small" data-action="delete-course" data-course="' + c.id + '">Delete</button>' +
+          '</div></div>';
+      }).join('');
+    }
+    return html;
   }
 
   function renderCourseEditor() {
     var ed = ui.courseEditor;
-    var tee = ed.tees.find(function (t) { return t.id === ed.activeTeeId; }) || ed.tees[0];
+    var course = ed.course;
+    var hole = course.holes[ed.currentHole - 1];
+    var totallyUnmapped = course.holes.every(function (h) { return h.greenLat == null && h.defaultTeeLat == null; });
 
-    var teeTabs = ed.tees.map(function (t) {
-      return '<button class="tab-btn' + (t.id === tee.id ? ' active' : '') + '" data-action="select-tee-tab" data-tee="' + t.id + '">' + escapeHtml(t.name) + '</button>';
-    }).join('') + '<button class="tab-btn" data-action="add-tee">+ Tee</button>';
+    var holeDots = course.holes.map(function (h, i) {
+      var mapped = h.greenLat != null && (h.defaultTeeLat != null || Object.keys(h.teeOverrides).length);
+      return '<button class="hole-dot' + (i + 1 === ed.currentHole ? ' current' : '') + (mapped ? ' done' : '') + '" data-action="editor-goto-hole" data-index="' + i + '">' + h.number + '</button>';
+    }).join('');
 
-    var header = '<div class="hole-edit-row" style="font-size:.72rem;color:var(--text-muted);font-weight:700">' +
-      '<div></div><div>PAR</div><div>YARDS</div><div></div></div>';
+    var modeChips = '<button class="tab-btn' + (ed.mode.type === 'green' ? ' active' : '') + '" data-action="editor-set-mode" data-mode="green">&#9971; Green</button>' +
+      course.teeSets.map(function (t) {
+        var active = ed.mode.type === 'tee' && ed.mode.teeSetId === t.id;
+        return '<button class="tab-btn' + (active ? ' active' : '') + '" data-action="editor-set-mode" data-mode="tee" data-tee="' + t.id + '" style="' + (active ? ('background:' + t.color + ';border-color:' + t.color) : ('border-color:' + t.color)) + '">' + escapeHtml(t.name) + '</button>';
+      }).join('') +
+      '<button class="tab-btn" data-action="editor-add-tee-set">+ Tee Set</button>';
 
-    var rows = tee.holes.map(function (h) {
-      var gpsCol = ed.showGps ?
-        '<div class="row" style="gap:4px">' +
-        '<button class="gps-mini-btn' + (h.teeLat != null ? ' set' : '') + '" title="Set tee GPS" data-action="set-hole-gps" data-tee="' + tee.id + '" data-hole="' + h.number + '" data-point="tee">T</button>' +
-        '<button class="gps-mini-btn' + (h.greenLat != null ? ' set' : '') + '" title="Set green GPS" data-action="set-hole-gps" data-tee="' + tee.id + '" data-hole="' + h.number + '" data-point="green">G</button>' +
-        '</div>' : '<span></span>';
-      return '<div class="hole-edit-row">' +
-        '<div class="hnum">' + h.number + '</div>' +
-        '<input type="number" inputmode="numeric" min="3" max="6" value="' + h.par + '" data-action="edit-par" data-tee="' + tee.id + '" data-hole="' + h.number + '">' +
-        '<input type="number" inputmode="numeric" min="0" value="' + (h.yards || '') + '" placeholder="yds" data-action="edit-yards" data-tee="' + tee.id + '" data-hole="' + h.number + '">' +
-        gpsCol +
-        '</div>';
+    var activeTeeSet = ed.mode.type === 'tee' ? course.teeSets.find(function (t) { return t.id === ed.mode.teeSetId; }) : null;
+    var hint = ed.mode.type === 'green' ?
+      'Tap the map to place the green for hole ' + hole.number + '. Drag the pin to fine-tune it.' :
+      'Tap the map to place the ' + escapeHtml(activeTeeSet ? activeTeeSet.name : '') + ' tee for hole ' + hole.number + '. Drag the pin to fine-tune it.';
+
+    var yardageLines = course.teeSets.map(function (t) {
+      var y = getTeeYards(course, hole, t.id);
+      return '<div class="club-stat-row"><span class="club-stat-name">' + escapeHtml(t.name) + '</span><span class="club-stat-detail">' + (y != null ? y + ' yds' : 'needs pins') + '</span></div>';
+    }).join('');
+
+    var teeSetChips = course.teeSets.map(function (t) {
+      return '<span class="chip-remove" style="border-color:' + t.color + '">' + escapeHtml(t.name) +
+        (course.teeSets.length > 1 ? ' <button data-action="editor-remove-tee-set" data-tee="' + t.id + '">&#10005;</button>' : '') + '</span>';
     }).join('');
 
     return '' +
       '<div class="card">' +
-      '<div class="field"><label>Course Name</label>' +
-      '<input type="text" value="' + escapeAttr(ed.name) + '" data-action="edit-course-name" placeholder="e.g. Pebble Beach Golf Links"></div>' +
-      '<div class="field"><label># Holes</label><select data-action="edit-num-holes">' +
-      '<option value="18"' + (ed.numHoles === 18 ? ' selected' : '') + '>18</option>' +
-      '<option value="9"' + (ed.numHoles === 9 ? ' selected' : '') + '>9</option>' +
-      '</select></div>' +
+      '<h3 style="margin:0">' + escapeHtml(course.name) + '</h3>' +
+      (course.address ? '<p class="hole-meta">' + escapeHtml(course.address) + '</p>' : '') +
+      (totallyUnmapped ? '<p class="hint">OpenStreetMap doesn\'t have detailed hole data for this course yet. Place each hole\'s tee and green pins manually below.</p>' : '') +
       '</div>' +
+      '<div class="hole-strip">' + holeDots + '</div>' +
+      '<div class="tabs">' + modeChips + '</div>' +
+      '<div id="map-slot" style="height:340px;border-radius:14px;overflow:hidden;margin-bottom:12px"></div>' +
+      '<p class="hint">' + hint + '</p>' +
       '<div class="card">' +
-      '<div class="row between"><h3 style="margin:0">Tees</h3>' +
-      '<button class="btn ghost small" data-action="toggle-gps">' + (ed.showGps ? 'Hide GPS' : 'GPS capture') + '</button></div>' +
-      '<div class="tabs">' + teeTabs + '</div>' +
-      header + rows +
-      (ed.tees.length > 1 ? '<button class="btn danger ghost small" style="margin-top:8px" data-action="delete-tee" data-tee="' + tee.id + '">Delete ' + escapeHtml(tee.name) + ' tees</button>' : '') +
-      (ed.showGps ? '<p class="hint">Stand at the tee box or on the green and tap T / G to capture GPS coordinates for extra accuracy. Optional &mdash; yardage alone works fine.</p>' : '') +
+      '<div class="field"><label>Par (hole ' + hole.number + ')</label><input type="number" min="3" max="6" value="' + hole.par + '" data-action="editor-edit-par"></div>' +
+      yardageLines +
       '</div>' +
+      '<div class="card"><label>Tee Sets</label><div class="row wrap">' + teeSetChips + '</div></div>' +
       '<div class="row" style="gap:10px">' +
       '<button class="btn secondary block" data-action="cancel-course-editor">Cancel</button>' +
       '<button class="btn block" data-action="save-course">Save Course</button>' +
-      '</div>';
+      '</div>' +
+      (!ed.isNew ? '<button class="btn danger ghost block" style="margin-top:8px" data-action="delete-course" data-course="' + course.id + '">Delete Course</button>' : '');
   }
 
   // ---------------- render: clubs ----------------
@@ -487,7 +678,7 @@
         return '<div class="card history-item" data-action="view-round" data-round="' + r.id + '">' +
           '<div class="row between">' +
           '<div><div style="font-weight:700">' + escapeHtml(r.courseName) + '</div>' +
-          '<div class="hole-meta">' + escapeHtml(r.teeName) + ' tees &middot; ' + new Date(r.date).toLocaleDateString() + '</div></div>' +
+          '<div class="hole-meta">' + escapeHtml(r.teeSetName) + ' tees &middot; ' + new Date(r.date).toLocaleDateString() + '</div></div>' +
           '<div style="text-align:right"><div class="history-score">' + (scored.length ? total : '&mdash;') + '</div>' +
           (scored.length ? '<div class="to-par ' + scoreToParClass(diff) + '">' + formatToPar(diff) + '</div>' : '') +
           '</div></div></div>';
@@ -507,41 +698,19 @@
     return '<div class="section-title">Past Rounds</div>' + listHtml + statsHtml;
   }
 
-  // ---------------- render: shot modal ----------------
+  // ---------------- render: shot sheet modal ----------------
 
   function renderModal() {
     var root = document.getElementById('modal-root');
-    if (!ui.shotModal) { root.innerHTML = ''; return; }
-    var m = ui.shotModal;
+    if (!ui.shotSheet) { root.innerHTML = ''; return; }
+    var m = ui.shotSheet;
 
     var clubChips = state.clubs.map(function (c) {
       return '<button class="club-chip' + (m.club === c ? ' selected' : '') + '" data-action="select-club" data-club="' + escapeAttr(c) + '">' + escapeHtml(c) + '</button>';
     }).join('');
 
-    var round = activeRound();
-    var hole = round ? currentHoleObj(round) : null;
-    var ref = hole ? lastReferencePoint(hole) : null;
-
-    var methodSection = '';
-    if (m.method === 'gps') {
-      if (!ref) {
-        var noRefLabel = hole.shots.length ?
-          'Your last shot on this hole was entered manually, so there\'s no GPS point to measure from.' :
-          'No starting point recorded for this hole yet.';
-        methodSection = '<p class="hint">' + noRefLabel + '</p>' +
-          '<button class="btn secondary block" data-action="mark-tee-gps">&#128205; Set my current position as the GPS reference point</button>';
-      } else {
-        var statusText = '', statusClass = '';
-        if (m.gpsStatus === 'locating') { statusText = 'Locating&hellip;'; }
-        else if (m.gpsStatus === 'ok') { statusText = 'Location captured (&plusmn;' + Math.round(m.gpsPoint.accuracy) + 'm accuracy).'; statusClass = 'ok'; }
-        else if (m.gpsStatus && m.gpsStatus.indexOf('err:') === 0) { statusText = m.gpsStatus.slice(4); statusClass = 'err'; }
-        methodSection = '<button class="btn secondary block" data-action="capture-gps">&#128205; Capture my location (ball position)</button>' +
-          '<div class="gps-status ' + statusClass + '">' + statusText + '</div>';
-      }
-    } else {
-      methodSection = '<div class="field"><label>Distance this shot traveled (yards)</label>' +
-        '<input type="number" inputmode="numeric" data-action="manual-yards-input" value="' + escapeAttr(m.manualYards) + '" placeholder="e.g. 165"></div>';
-    }
+    var locationLine = m.locating ? 'Locating your position&hellip;' :
+      (m.lat != null ? 'Shot location set (' + m.lat.toFixed(5) + ', ' + m.lon.toFixed(5) + ').' : 'Tap the map to set a location.');
 
     root.innerHTML = '' +
       '<div class="modal-overlay">' +
@@ -549,24 +718,45 @@
       '<div class="modal-title">Log Shot</div>' +
       '<label>Club</label>' +
       '<div class="club-grid">' + clubChips + '</div>' +
-      '<div class="method-toggle">' +
-      '<button class="btn' + (m.method === 'gps' ? '' : ' secondary') + '" data-action="select-method" data-method="gps">GPS</button>' +
-      '<button class="btn' + (m.method === 'manual' ? '' : ' secondary') + '" data-action="select-method" data-method="manual">Manual entry</button>' +
-      '</div>' +
-      methodSection +
+      '<p class="gps-status' + (m.lat != null ? ' ok' : '') + '">' + escapeHtml(locationLine) + '</p>' +
       (m.error ? '<div class="gps-status err">' + escapeHtml(m.error) + '</div>' : '') +
       '<div class="row" style="margin-top:14px;gap:10px">' +
       '<button class="btn secondary block" data-action="close-modal">Cancel</button>' +
-      '<button class="btn block" data-action="confirm-add-shot">Add Shot</button>' +
+      '<button class="btn block" data-action="confirm-add-shot" ' + (m.lat == null ? 'disabled' : '') + '>Add Shot</button>' +
       '</div>' +
       '</div>' +
       '</div>';
   }
 
+  // ---------------- search helper ----------------
+
+  function runCourseSearch() {
+    var input = document.getElementById('course-search-input');
+    var q = input ? input.value.trim() : '';
+    if (!q) return;
+    ui.search.query = q;
+    ui.search.loading = true;
+    ui.search.error = '';
+    ui.search.results = [];
+    ui.search.searched = false;
+    render();
+    window.GolfOSM.searchCourses(q).then(function (results) {
+      ui.search.loading = false;
+      ui.search.results = results;
+      ui.search.searched = true;
+      render();
+    }).catch(function (err) {
+      ui.search.loading = false;
+      ui.search.error = err.message;
+      ui.search.searched = true;
+      render();
+    });
+  }
+
   // ---------------- action handling ----------------
 
   function handleAction(action, el) {
-    var round, hole, ed, tee;
+    var round, hole, ed, course;
 
     switch (action) {
       case 'nav':
@@ -574,11 +764,42 @@
         render();
         break;
 
+      case 'run-course-search':
+        runCourseSearch();
+        break;
+
+      case 'select-search-result': {
+        var idx = parseInt(el.getAttribute('data-index'), 10);
+        var hit = ui.search.results[idx];
+        ui.search.loading = true;
+        render();
+        window.GolfOSM.loadCourseDetail(hit).then(function (detail) {
+          var newCourse = {
+            id: uid(), source: 'osm', osmType: detail.osmType, osmId: detail.osmId,
+            name: detail.name, address: hit.address, lat: detail.lat, lon: detail.lon,
+            boundary: detail.boundary, fairwayRings: detail.fairwayRings || [], bunkerRings: detail.bunkerRings || [],
+            holes: detail.holes.length ? detail.holes : makeBlankHoles(18),
+            teeSets: [{ id: uid(), name: 'Default', color: TEE_COLORS[0] }]
+          };
+          ui.search.loading = false;
+          ui.courseEditor = { course: newCourse, isNew: true, currentHole: 1, mode: { type: 'green' } };
+          ui.view = 'courseEditor';
+          lastFitKey = null;
+          render();
+        }).catch(function (err) {
+          ui.search.loading = false;
+          render();
+          flash('Could not load that course: ' + err.message, 'err');
+        });
+        break;
+      }
+
       // start round
       case 'start-round': {
         var teeSelect = document.getElementById('start-tee-select');
         if (!teeSelect) return;
         startRound(el.getAttribute('data-course'), teeSelect.value);
+        lastFitKey = null;
         render();
         break;
       }
@@ -599,83 +820,53 @@
         round.currentHole = parseInt(el.getAttribute('data-index'), 10) + 1;
         saveState(); render();
         break;
-
-      case 'mark-tee-gps':
-        round = activeRound();
-        hole = currentHoleObj(round);
-        getPosition().then(function (pt) {
-          hole.teeLat = pt.lat; hole.teeLon = pt.lon;
-          saveState(); render();
-        }).catch(function (err) { flash('Location error: ' + err.message, 'err'); });
+      case 'recenter-map':
+        lastFitKey = null;
+        render();
         break;
 
       case 'open-shot-modal':
         round = activeRound();
-        ui.shotModal = {
-          club: ui.lastClub || state.clubs[0],
-          method: navigator.geolocation ? 'gps' : 'manual',
-          manualYards: '',
-          gpsPoint: null,
-          gpsStatus: '',
-          error: ''
-        };
-        render();
-        break;
-      case 'select-club':
-        ui.shotModal.club = el.getAttribute('data-club');
-        ui.shotModal.error = '';
-        render();
-        break;
-      case 'select-method':
-        ui.shotModal.method = el.getAttribute('data-method');
-        ui.shotModal.error = '';
-        render();
-        break;
-      case 'capture-gps':
-        ui.shotModal.gpsStatus = 'locating';
+        ui.shotSheet = { lat: null, lon: null, club: ui.lastClub || state.clubs[0], error: '', locating: true };
         render();
         getPosition().then(function (pt) {
-          if (!ui.shotModal) return;
-          ui.shotModal.gpsPoint = pt;
-          ui.shotModal.gpsStatus = 'ok';
+          if (!ui.shotSheet) return;
+          ui.shotSheet.lat = pt.lat; ui.shotSheet.lon = pt.lon; ui.shotSheet.locating = false;
           render();
         }).catch(function (err) {
-          if (!ui.shotModal) return;
-          ui.shotModal.gpsStatus = 'err:' + err.message;
+          if (!ui.shotSheet) return;
+          ui.shotSheet.error = err.message; ui.shotSheet.locating = false;
           render();
         });
         break;
+      case 'select-club':
+        ui.shotSheet.club = el.getAttribute('data-club');
+        ui.shotSheet.error = '';
+        render();
+        break;
       case 'close-modal':
-        ui.shotModal = null;
+        ui.shotSheet = null;
         render();
         break;
       case 'confirm-add-shot': {
-        var m = ui.shotModal;
+        var m = ui.shotSheet;
         round = activeRound();
         hole = currentHoleObj(round);
         if (!m.club) { m.error = 'Select a club.'; render(); return; }
-        var distance, lat = null, lon = null;
-        if (m.method === 'gps') {
-          if (!m.gpsPoint) { m.error = 'Tap "Capture my location" first.'; render(); return; }
-          var ref = lastReferencePoint(hole);
-          if (!ref) { m.error = 'Mark the tee location first, then capture this shot.'; render(); return; }
-          distance = distanceYards(ref.lat, ref.lon, m.gpsPoint.lat, m.gpsPoint.lon);
-          lat = m.gpsPoint.lat; lon = m.gpsPoint.lon;
-        } else {
-          var val = parseFloat(m.manualYards);
-          if (!val || val <= 0) { m.error = 'Enter how many yards that shot traveled.'; render(); return; }
-          distance = val;
-        }
-        hole.shots.push({ id: uid(), club: m.club, distance: distance, method: m.method, lat: lat, lon: lon, time: Date.now() });
+        if (m.lat == null) { m.error = 'Set a location for this shot first.'; render(); return; }
+        var prev = lastPlayPoint(hole);
+        if (!prev) { m.error = 'This hole has no tee location yet.'; render(); return; }
+        var dist = distanceYards(prev.lat, prev.lon, m.lat, m.lon);
+        hole.shots.push({ id: uid(), club: m.club, lat: m.lat, lon: m.lon, distance: dist, time: Date.now() });
         ui.lastClub = m.club;
-        ui.shotModal = null;
+        ui.shotSheet = null;
         saveState();
         render();
         break;
       }
       case 'remove-shot':
         round = activeRound();
-        hole = round.holes.find(function (h) { return h.number === parseInt(el.getAttribute('data-hole'), 10); });
+        hole = currentHoleObj(round);
         hole.shots = hole.shots.filter(function (s) { return s.id !== el.getAttribute('data-shot'); });
         saveState(); render();
         break;
@@ -728,18 +919,26 @@
         break;
 
       // courses
-      case 'new-course': {
-        var newTee = makeTee('White', 18);
-        ui.courseEditor = { id: null, name: '', numHoles: 18, tees: [newTee], activeTeeId: newTee.id, showGps: false };
+      case 'open-saved-course': {
+        course = findCourse(el.getAttribute('data-course'));
+        var clone = JSON.parse(JSON.stringify(course));
+        ui.courseEditor = { course: clone, isNew: false, currentHole: 1, mode: { type: 'green' } };
         ui.view = 'courseEditor';
+        lastFitKey = null;
         render();
         break;
       }
-      case 'edit-course': {
-        var course = findCourse(el.getAttribute('data-course'));
-        var clone = JSON.parse(JSON.stringify(course));
-        ui.courseEditor = { id: clone.id, name: clone.name, numHoles: clone.numHoles, tees: clone.tees, activeTeeId: clone.tees[0].id, showGps: false };
+      case 'edit-active-course': {
+        round = activeRound();
+        course = findCourse(round.courseId);
+        var cloneA = JSON.parse(JSON.stringify(course));
+        var ch = cloneA.holes[round.currentHole - 1];
+        ui.courseEditor = {
+          course: cloneA, isNew: false, currentHole: round.currentHole,
+          mode: (ch.greenLat == null) ? { type: 'green' } : { type: 'tee', teeSetId: cloneA.teeSets[0].id }
+        };
         ui.view = 'courseEditor';
+        lastFitKey = null;
         render();
         break;
       }
@@ -747,50 +946,41 @@
         if (!window.confirm('Delete this course? Any saved rounds for it will remain in History.')) return;
         var cid = el.getAttribute('data-course');
         state.courses = state.courses.filter(function (c) { return c.id !== cid; });
+        if (ui.courseEditor && ui.courseEditor.course.id === cid) {
+          ui.courseEditor = null;
+          ui.view = 'courses';
+        }
         saveState(); render();
         break;
 
-      case 'select-tee-tab':
-        ui.courseEditor.activeTeeId = el.getAttribute('data-tee');
+      case 'editor-goto-hole':
+        ui.courseEditor.currentHole = parseInt(el.getAttribute('data-index'), 10) + 1;
         render();
         break;
-      case 'add-tee': {
+      case 'editor-set-mode':
         ed = ui.courseEditor;
-        var name = window.prompt('Tee name (e.g. Blue, Red, Gold):', '');
+        ed.mode = el.getAttribute('data-mode') === 'green' ? { type: 'green' } : { type: 'tee', teeSetId: el.getAttribute('data-tee') };
+        render();
+        break;
+      case 'editor-add-tee-set': {
+        ed = ui.courseEditor;
+        var name = window.prompt('Tee name (e.g. Blue, White, Red):', '');
         if (!name || !name.trim()) return;
-        tee = ed.tees.find(function (t) { return t.id === ed.activeTeeId; }) || ed.tees[0];
-        var copiedHoles = tee.holes.map(function (h) {
-          return { number: h.number, par: h.par, yards: h.yards, teeLat: null, teeLon: null, greenLat: null, greenLon: null };
-        });
-        var addedTee = { id: uid(), name: name.trim(), holes: copiedHoles };
-        ed.tees.push(addedTee);
-        ed.activeTeeId = addedTee.id;
+        var newTeeSet = { id: uid(), name: name.trim(), color: TEE_COLORS[ed.course.teeSets.length % TEE_COLORS.length] };
+        ed.course.teeSets.push(newTeeSet);
+        ed.mode = { type: 'tee', teeSetId: newTeeSet.id };
         render();
         break;
       }
-      case 'delete-tee':
+      case 'editor-remove-tee-set': {
         ed = ui.courseEditor;
-        if (ed.tees.length <= 1) return;
+        if (ed.course.teeSets.length <= 1) return;
         if (!window.confirm('Delete this tee set?')) return;
-        var tid = el.getAttribute('data-tee');
-        ed.tees = ed.tees.filter(function (t) { return t.id !== tid; });
-        ed.activeTeeId = ed.tees[0].id;
+        var tsid = el.getAttribute('data-tee');
+        ed.course.teeSets = ed.course.teeSets.filter(function (t) { return t.id !== tsid; });
+        ed.course.holes.forEach(function (h) { delete h.teeOverrides[tsid]; });
+        if (ed.mode.type === 'tee' && ed.mode.teeSetId === tsid) ed.mode = { type: 'green' };
         render();
-        break;
-      case 'toggle-gps':
-        ui.courseEditor.showGps = !ui.courseEditor.showGps;
-        render();
-        break;
-      case 'set-hole-gps': {
-        ed = ui.courseEditor;
-        tee = ed.tees.find(function (t) { return t.id === el.getAttribute('data-tee'); });
-        hole = tee.holes.find(function (h) { return h.number === parseInt(el.getAttribute('data-hole'), 10); });
-        var point = el.getAttribute('data-point');
-        getPosition().then(function (pt) {
-          if (point === 'tee') { hole.teeLat = pt.lat; hole.teeLon = pt.lon; }
-          else { hole.greenLat = pt.lat; hole.greenLon = pt.lon; }
-          render();
-        }).catch(function (err) { flash('Location error: ' + err.message, 'err'); });
         break;
       }
       case 'cancel-course-editor':
@@ -800,15 +990,22 @@
         break;
       case 'save-course': {
         ed = ui.courseEditor;
-        if (!ed.name.trim()) { flash('Please enter a course name.', 'err'); return; }
-        var missingYards = ed.tees.some(function (t) { return t.holes.some(function (h) { return !h.yards || h.yards <= 0; }); });
-        if (missingYards && !window.confirm('Some holes are missing yardage. Save anyway?')) return;
-        var courseData = { id: ed.id || uid(), name: ed.name.trim(), numHoles: ed.numHoles, tees: ed.tees };
-        if (ed.id) {
-          var idx = state.courses.findIndex(function (c) { return c.id === ed.id; });
-          state.courses[idx] = courseData;
-        } else {
-          state.courses.push(courseData);
+        if (ed.isNew) state.courses.push(ed.course);
+        else {
+          var cidx = state.courses.findIndex(function (c) { return c.id === ed.course.id; });
+          state.courses[cidx] = ed.course;
+        }
+        var ar = activeRound();
+        if (ar && ar.courseId === ed.course.id) {
+          ar.holes.forEach(function (rh) {
+            var ch2 = ed.course.holes.find(function (h) { return h.number === rh.number; });
+            if (!ch2) return;
+            if (rh.teeLat == null) {
+              var tp = getTeePoint(ed.course, ch2, ar.teeSetId);
+              if (tp) { rh.teeLat = tp.lat; rh.teeLon = tp.lon; }
+            }
+            if (rh.greenLat == null && ch2.greenLat != null) { rh.greenLat = ch2.greenLat; rh.greenLon = ch2.greenLon; }
+          });
         }
         saveState();
         ui.courseEditor = null;
@@ -842,25 +1039,10 @@
   }
 
   function handleChangeAction(action, el) {
-    var round, hole, ed;
+    var round, hole;
     switch (action) {
       case 'select-start-course':
         ui.startCourseId = el.value;
-        render();
-        break;
-      case 'edit-num-holes':
-        ed = ui.courseEditor;
-        var n = parseInt(el.value, 10);
-        ed.numHoles = n;
-        ed.tees.forEach(function (t) {
-          if (n > t.holes.length) {
-            for (var i = t.holes.length + 1; i <= n; i++) {
-              t.holes.push({ number: i, par: 4, yards: 0, teeLat: null, teeLon: null, greenLat: null, greenLon: null });
-            }
-          } else {
-            t.holes = t.holes.slice(0, n);
-          }
-        });
         render();
         break;
       case 'edit-score':
@@ -879,25 +1061,11 @@
   }
 
   function handleSilentInput(action, el) {
-    var ed, tee, hole;
+    var ed;
     switch (action) {
-      case 'edit-course-name':
-        ui.courseEditor.name = el.value;
-        break;
-      case 'edit-par':
+      case 'editor-edit-par':
         ed = ui.courseEditor;
-        tee = ed.tees.find(function (t) { return t.id === el.getAttribute('data-tee'); });
-        hole = tee.holes.find(function (h) { return h.number === parseInt(el.getAttribute('data-hole'), 10); });
-        hole.par = parseInt(el.value, 10) || 0;
-        break;
-      case 'edit-yards':
-        ed = ui.courseEditor;
-        tee = ed.tees.find(function (t) { return t.id === el.getAttribute('data-tee'); });
-        hole = tee.holes.find(function (h) { return h.number === parseInt(el.getAttribute('data-hole'), 10); });
-        hole.yards = parseInt(el.value, 10) || 0;
-        break;
-      case 'manual-yards-input':
-        ui.shotModal.manualYards = el.value;
+        ed.course.holes[ed.currentHole - 1].par = parseInt(el.value, 10) || 0;
         break;
       default:
         break;
@@ -908,7 +1076,7 @@
 
   document.addEventListener('click', function (e) {
     if (e.target.classList && e.target.classList.contains('modal-overlay')) {
-      ui.shotModal = null;
+      ui.shotSheet = null;
       render();
       return;
     }
@@ -931,6 +1099,13 @@
     if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') return;
     if (el.getAttribute('data-action') === 'edit-score') return;
     handleSilentInput(el.getAttribute('data-action'), el);
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && e.target && e.target.id === 'course-search-input') {
+      e.preventDefault();
+      runCourseSearch();
+    }
   });
 
   // ---------------- init ----------------

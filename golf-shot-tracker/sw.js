@@ -1,5 +1,11 @@
-var CACHE = 'golf-shot-mapper-v1';
-var ASSETS = ['./', './index.html', './css/style.css', './js/app.js', './manifest.json', './icons/icon.svg'];
+var CACHE = 'golf-shot-mapper-v2';
+var ASSETS = [
+  './', './index.html', './css/style.css', './js/app.js', './js/osm.js',
+  './manifest.json', './icons/icon.svg',
+  './vendor/leaflet/leaflet.css', './vendor/leaflet/leaflet.js',
+  './vendor/leaflet/images/marker-icon.png', './vendor/leaflet/images/marker-icon-2x.png',
+  './vendor/leaflet/images/marker-shadow.png', './vendor/leaflet/images/layers.png', './vendor/leaflet/images/layers-2x.png'
+];
 
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(ASSETS); }));
