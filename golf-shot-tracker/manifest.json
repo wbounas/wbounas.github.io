@@ -1,7 +1,7 @@
 {
   "name": "Golf Shot Mapper",
   "short_name": "ShotMapper",
-  "description": "Map every shot of a round of golf using course yardages and GPS, then review your scorecard and club distances.",
+  "description": "Search for a real golf course, load its map, and replay a round shot-by-shot by dropping pins -- with a live scorecard and club distances.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

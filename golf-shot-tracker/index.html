@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <title>Golf Shot Mapper</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
-<meta name="description" content="Map every shot of a round of golf using course yardages and GPS, then review your scorecard and club distances.">
+<meta name="description" content="Search for a real golf course, load its map, and replay a round shot-by-shot by dropping pins -- with a live scorecard and club distances.">
 <meta name="theme-color" content="#1b5e3a">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
@@ -12,6 +12,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Shot Mapper">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -43,6 +44,8 @@
   </button>
 </nav>
 
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="js/osm.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

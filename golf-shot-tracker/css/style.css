@@ -303,10 +303,8 @@ input:focus, select:focus { outline: 2px solid var(--green-600); }
 /* Course editor */
 .hole-edit-row { display: grid; grid-template-columns: 34px 1fr 1fr auto; gap: 8px; align-items: center; margin-bottom: 6px; }
 .hole-edit-row .hnum { font-weight: 700; color: var(--text-muted); text-align: center; }
-.gps-mini-btn { background: none; border: 1px solid var(--border); border-radius: 8px; padding: 8px; font-size: .95rem; }
-.gps-mini-btn.set { border-color: var(--green-700); background: var(--green-100); }
-
 .course-card { display: flex; justify-content: space-between; align-items: center; }
+.course-card[data-action] { cursor: pointer; }
 .course-card .meta { color: var(--text-muted); font-size: .85rem; }
 
 .history-item { cursor: pointer; }
@@ -323,3 +321,20 @@ input:focus, select:focus { outline: 2px solid var(--green-600); }
 .chip-remove button { background: none; border: none; color: var(--danger); font-weight: 700; padding: 0; }
 
 a { color: var(--green-700); }
+
+/* Leaflet map pins */
+.golf-pin-inner {
+  border-radius: 50%;
+  color: #fff;
+  text-align: center;
+  font-weight: 700;
+  font-size: .78rem;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,.45);
+}
+.golf-pin-flag {
+  font-size: 24px;
+  line-height: 1;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,.5));
+}
+#map-slot { border: 1px solid var(--border); background: var(--bg); }
