@@ -621,7 +621,7 @@
           '<div class="btn secondary small">Load</div>' +
           '</div>';
       }).join('');
-    } else if (search.searched && !search.loading) {
+    } else if (search.searched && !search.loading && !search.error) {
       html += '<p class="hint">No golf courses found nearby. Try a broader search, like just the city or state.</p>';
     }
 
