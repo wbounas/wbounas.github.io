@@ -1,13 +1,18 @@
 // Looks up real golf courses via OpenStreetMap's free, no-signup public APIs:
 // Nominatim for text/zip search, Overpass for the actual hole/tee/green geometry.
-// Coverage varies per course -- some are mapped hole-by-hole, many only have an
-// outline. Callers should treat missing tee/green points as "needs manual pins."
+// Coverage varies per course -- some are mapped hole-by-hole with per-colour tee
+// boxes, many only have an outline. Callers should treat missing tee/green
+// points as "needs manual pins."
 (function (global) {
   'use strict';
 
   var NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
   var OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
   var METERS_PER_MILE = 1609.344;
+  // How far an untagged tee/green may sit from a hole line's start/end and
+  // still be treated as belonging to that hole.
+  var TEE_MATCH_METERS = 250;
+  var GREEN_MATCH_METERS = 150;
 
   function distanceMeters(lat1, lon1, lat2, lon2) {
     var R = 6371000;
@@ -21,27 +26,33 @@
 
   function isZip(q) { return /^\d{5}(-\d{4})?$/.test(q.trim()); }
 
-  function nominatimSearch(query) {
-    var params = {
-      format: 'jsonv2',
-      addressdetails: '1',
-      extratags: '1',
-      limit: '6'
-    };
-    if (isZip(query)) {
-      params.postalcode = query.trim();
-      params.country = 'us';
-    } else {
-      params.q = query;
-    }
+  function nominatimFetch(params) {
+    params.format = 'jsonv2';
+    params.addressdetails = '1';
+    params.extratags = '1';
+    params.limit = '6';
     var qs = Object.keys(params).map(function (k) {
       return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
     }).join('&');
     return fetch(NOMINATIM_URL + '?' + qs, { headers: { 'Accept': 'application/json' } })
       .then(function (res) {
+        if (res.status === 429) throw new Error('The free location service is rate-limited right now. Wait a few seconds and try again.');
         if (!res.ok) throw new Error('Location lookup failed (' + res.status + ').');
         return res.json();
       });
+  }
+
+  // Structured postal-code lookups on Nominatim miss some US zips entirely,
+  // so fall back to a free-form query before giving up.
+  function nominatimSearch(query) {
+    var q = query.trim();
+    if (isZip(q)) {
+      return nominatimFetch({ postalcode: q, country: 'us' }).then(function (places) {
+        if (places.length) return places;
+        return nominatimFetch({ q: q + ', USA' });
+      });
+    }
+    return nominatimFetch({ q: q });
   }
 
   function overpassQuery(ql) {
@@ -64,7 +75,7 @@
     return {
       osmType: p.osm_type,
       osmId: p.osm_id,
-      name: (p.namedetails && p.namedetails.name) || p.display_name.split(',')[0],
+      name: p.display_name.split(',')[0],
       address: p.display_name,
       lat: parseFloat(p.lat),
       lon: parseFloat(p.lon),
@@ -152,38 +163,52 @@
     return { lat: sLat / pts.length, lon: sLon / pts.length };
   }
 
-  function parseCourseDetail(json, meta) {
-    var elements = json.elements || [];
-    var courseEl = elements.find(function (el) {
-      return el.id === meta.osmId && el.type === meta.osmType;
+  function bboxAround(points, fallbackLat, fallbackLon) {
+    var s = Infinity, w = Infinity, n = -Infinity, e = -Infinity;
+    (points || []).forEach(function (p) {
+      var lat = p[0], lon = p[1];
+      if (lat < s) s = lat;
+      if (lat > n) n = lat;
+      if (lon < w) w = lon;
+      if (lon > e) e = lon;
     });
+    if (s === Infinity) {
+      // ~1.3km square around the course center when we have no outline at all
+      s = fallbackLat - 0.012; n = fallbackLat + 0.012;
+      w = fallbackLon - 0.015; e = fallbackLon + 0.015;
+    } else {
+      // pad ~200m so tee boxes just outside the drawn boundary still match
+      s -= 0.002; n += 0.002; w -= 0.0025; e += 0.0025;
+    }
+    return { s: s, w: w, n: n, e: e };
+  }
 
-    var holesByRef = {};
-    var teesByRef = {};
-    var greensByRef = {};
+  function parseCourseDetail(courseEl, json, meta) {
+    var elements = json.elements || [];
+    var holeEls = [];
+    var teeEls = [];
+    var greenEls = [];
     var fairwayRings = [];
     var bunkerRings = [];
 
     elements.forEach(function (el) {
       var tags = el.tags || {};
-      if (el === courseEl) return;
+      if (courseEl && el.id === courseEl.id && el.type === courseEl.type) return;
       if (tags.golf === 'hole') {
-        var ref = parseInt(tags.ref, 10);
-        if (!ref) return;
-        var entry = holesByRef[ref] = holesByRef[ref] || {};
-        if (tags.par) entry.par = parseInt(tags.par, 10);
-        if (el.geometry && el.geometry.length) {
-          entry.lineStart = el.geometry[0];
-          entry.lineEnd = el.geometry[el.geometry.length - 1];
-        }
+        holeEls.push(el);
       } else if (tags.golf === 'tee') {
-        var refT = parseInt(tags.ref, 10);
         var ptT = centroidOf(el);
-        if (ptT && refT) (teesByRef[refT] = teesByRef[refT] || []).push(ptT);
+        if (ptT) {
+          teeEls.push({
+            pt: ptT,
+            ref: parseInt(tags.ref, 10) || null,
+            colour: ((tags.colour || tags.color || '') + '').toLowerCase() || null,
+            name: tags.name || null
+          });
+        }
       } else if (tags.golf === 'green') {
-        var refG = parseInt(tags.ref, 10);
         var ptG = centroidOf(el);
-        if (ptG && refG) (greensByRef[refG] = greensByRef[refG] || []).push(ptG);
+        if (ptG) greenEls.push({ pt: ptG, ref: parseInt(tags.ref, 10) || null });
       } else if (tags.golf === 'fairway') {
         var ringF = ringOf(el);
         if (ringF) fairwayRings.push(ringF);
@@ -193,19 +218,92 @@
       }
     });
 
-    var holeNumbers = Object.keys(holesByRef).map(Number).sort(function (a, b) { return a - b; });
-    var holes = holeNumbers.map(function (num) {
-      var h = holesByRef[num];
-      var teePt = teesByRef[num] && teesByRef[num].length ? averagePts(teesByRef[num]) : (h.lineStart || null);
-      var greenPt = greensByRef[num] && greensByRef[num].length ? averagePts(greensByRef[num]) : (h.lineEnd || null);
+    // Build holes keyed by number. Refs win; holes with no usable ref get
+    // sequential numbers after the highest tagged one (first occurrence wins
+    // on collision).
+    var holesByNum = {};
+    var seq = 0;
+    holeEls.forEach(function (el) {
+      var tags = el.tags || {};
+      var num = parseInt(tags.ref, 10);
+      if (!num || num < 1) { seq++; num = 100 + seq; }
+      if (holesByNum[num]) return;
+      var line = (el.geometry || []).map(function (g) { return [g.lat, g.lon]; });
+      if (line.length < 2) return;
+      holesByNum[num] = {
+        number: num,
+        par: parseInt(tags.par, 10) || 4,
+        line: line,
+        start: { lat: line[0][0], lon: line[0][1] },
+        end: { lat: line[line.length - 1][0], lon: line[line.length - 1][1] }
+      };
+    });
+    // Renumber any placeholder (100+) holes into the gaps after tagged ones.
+    var nums = Object.keys(holesByNum).map(Number).sort(function (a, b) { return a - b; });
+    var fixed = {};
+    var nextNum = 1;
+    nums.forEach(function (num) {
+      var target = num < 100 ? num : nextNum;
+      while (fixed[target]) target++;
+      fixed[target] = holesByNum[num];
+      fixed[target].number = target;
+      nextNum = Math.max(nextNum, target + 1);
+    });
+    holesByNum = fixed;
+    nums = Object.keys(holesByNum).map(Number).sort(function (a, b) { return a - b; });
+
+    function nearestHole(pt, endName, maxMeters) {
+      var best = null, bestD = Infinity;
+      nums.forEach(function (num) {
+        var anchor = holesByNum[num][endName];
+        var d = distanceMeters(pt.lat, pt.lon, anchor.lat, anchor.lon);
+        if (d < bestD) { bestD = d; best = num; }
+      });
+      return bestD <= maxMeters ? best : null;
+    }
+
+    // Assign greens: ref wins, otherwise nearest hole-line end.
+    var greensByHole = {};
+    greenEls.forEach(function (g) {
+      var num = (g.ref && holesByNum[g.ref]) ? g.ref : nearestHole(g.pt, 'end', GREEN_MATCH_METERS);
+      if (num) (greensByHole[num] = greensByHole[num] || []).push(g.pt);
+    });
+
+    // Assign tees: ref wins, otherwise nearest hole-line start. Group into
+    // named sets by colour tag so Blue/White/Red pins come in automatically.
+    var teesByHole = {};       // hole -> all tee pts (for the default point)
+    var teeSetsByKey = {};     // setKey -> { key, holes: { num: [pts] } }
+    teeEls.forEach(function (t) {
+      var num = (t.ref && holesByNum[t.ref]) ? t.ref : nearestHole(t.pt, 'start', TEE_MATCH_METERS);
+      if (!num) return;
+      (teesByHole[num] = teesByHole[num] || []).push(t.pt);
+      var key = t.colour || (t.name ? t.name.toLowerCase() : null);
+      if (key) {
+        var set = teeSetsByKey[key] = teeSetsByKey[key] || { key: key, holes: {} };
+        (set.holes[num] = set.holes[num] || []).push(t.pt);
+      }
+    });
+
+    var teeSetKeys = Object.keys(teeSetsByKey);
+
+    var holes = nums.map(function (num) {
+      var h = holesByNum[num];
+      var teePt = teesByHole[num] ? averagePts(teesByHole[num]) : h.start;
+      var greenPt = greensByHole[num] ? averagePts(greensByHole[num]) : h.end;
+      var teesBySet = {};
+      teeSetKeys.forEach(function (key) {
+        var pts = teeSetsByKey[key].holes[num];
+        if (pts) teesBySet[key] = averagePts(pts);
+      });
       return {
         number: num,
-        par: h.par || 4,
+        par: h.par,
+        line: h.line,
         defaultTeeLat: teePt ? teePt.lat : null,
         defaultTeeLon: teePt ? teePt.lon : null,
         greenLat: greenPt ? greenPt.lat : null,
         greenLon: greenPt ? greenPt.lon : null,
-        teeOverrides: {}
+        teesBySet: teesBySet
       };
     });
 
@@ -218,27 +316,37 @@
       boundary: boundaryFromElement(courseEl),
       fairwayRings: fairwayRings,
       bunkerRings: bunkerRings,
+      teeSetKeys: teeSetKeys,
       holes: holes
     };
   }
 
-  // Fetches full hole-by-hole geometry for a specific course (already found via searchCourses).
+  // Fetches full hole-by-hole geometry for a specific course (already found
+  // via searchCourses). Two round-trips: the course outline first, then every
+  // golf feature inside its (padded) bounding box -- Overpass "area"
+  // derivation is unreliable for some courses, a plain bbox is not.
   function loadCourseDetail(hit) {
-    var areaId = (hit.osmType === 'relation' ? 3600000000 : 2400000000) + hit.osmId;
-    var ql = '[out:json][timeout:30];' +
-      '(way(id:' + hit.osmId + ');relation(id:' + hit.osmId + '););out tags geom;' +
-      'area(' + areaId + ')->.searchArea;' +
-      '(' +
-      'way(area.searchArea)[golf=hole];' +
-      'node(area.searchArea)[golf=tee];way(area.searchArea)[golf=tee];' +
-      'node(area.searchArea)[golf=green];way(area.searchArea)[golf=green];' +
-      'way(area.searchArea)[golf=fairway];' +
-      'way(area.searchArea)[golf=bunker];' +
-      ');out geom;';
-    return overpassQuery(ql).then(function (json) {
-      return parseCourseDetail(json, {
-        osmType: hit.osmType, osmId: hit.osmId,
-        fallbackName: hit.name, fallbackLat: hit.lat, fallbackLon: hit.lon
+    var meta = {
+      osmType: hit.osmType, osmId: hit.osmId,
+      fallbackName: hit.name, fallbackLat: hit.lat, fallbackLon: hit.lon
+    };
+    var q1 = '[out:json][timeout:25];(' + hit.osmType + '(id:' + hit.osmId + '););out tags geom;';
+    return overpassQuery(q1).then(function (j1) {
+      var courseEl = (j1.elements || []).find(function (el) {
+        return el.id === hit.osmId && el.type === hit.osmType;
+      }) || null;
+      var boundary = boundaryFromElement(courseEl);
+      var box = bboxAround(boundary, hit.lat, hit.lon);
+      var q2 = '[out:json][timeout:30][bbox:' + box.s + ',' + box.w + ',' + box.n + ',' + box.e + '];' +
+        '(' +
+        'way[golf=hole];' +
+        'node[golf=tee];way[golf=tee];' +
+        'node[golf=green];way[golf=green];' +
+        'way[golf=fairway];' +
+        'way[golf=bunker];' +
+        ');out geom;';
+      return overpassQuery(q2).then(function (j2) {
+        return parseCourseDetail(courseEl, j2, meta);
       });
     });
   }
