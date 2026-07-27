@@ -4,6 +4,29 @@
   var STORAGE_KEY = 'golfShotMapper.v2';
   var YARDS_PER_METER = 1.0936133;
   var TEE_COLORS = ['#1b5e3a', '#1565c0', '#c0392b', '#e08e0b', '#6a3fa0', '#00838f'];
+  // Standard scorecard tee colours -> pin colours, for tee boxes OSM has
+  // tagged with colour=*.
+  var TEE_COLOR_HEX = {
+    black: '#1f1f1f', blue: '#1565c0', white: '#f5f5f5', red: '#c0392b',
+    gold: '#d4a017', yellow: '#e3c000', green: '#2e7d32', silver: '#9aa0a6',
+    orange: '#e07b00', purple: '#6a3fa0', brown: '#795548', grey: '#757575', gray: '#757575'
+  };
+
+  function isLightColor(hex) {
+    var m = /^#([0-9a-f]{6})$/i.exec(hex || '');
+    if (!m) return false;
+    var n = parseInt(m[1], 16);
+    var r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    return (0.299 * r + 0.587 * g + 0.114 * b) > 170;
+  }
+
+  function colorForTeeKey(key, index) {
+    return TEE_COLOR_HEX[key] || TEE_COLORS[index % TEE_COLORS.length];
+  }
+
+  function capitalize(s) {
+    return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+  }
 
   var DEFAULT_CLUBS = [
     'Driver', '3 Wood', '5 Wood', '3 Hybrid',
@@ -92,7 +115,7 @@
   function makeBlankHoles(n) {
     var arr = [];
     for (var i = 1; i <= n; i++) {
-      arr.push({ number: i, par: 4, greenLat: null, greenLon: null, defaultTeeLat: null, defaultTeeLon: null, teeOverrides: {} });
+      arr.push({ number: i, par: 4, line: null, greenLat: null, greenLon: null, defaultTeeLat: null, defaultTeeLon: null, teeOverrides: {} });
     }
     return arr;
   }
@@ -108,6 +131,15 @@
     var tp = getTeePoint(course, hole, teeSetId);
     if (!tp || hole.greenLat == null) return null;
     return Math.round(distanceYards(tp.lat, tp.lon, hole.greenLat, hole.greenLon));
+  }
+
+  function courseTotalYards(course, teeSetId) {
+    var yards = 0, mapped = 0;
+    course.holes.forEach(function (h) {
+      var y = getTeeYards(course, h, teeSetId);
+      if (y != null) { yards += y; mapped++; }
+    });
+    return { yards: yards, mapped: mapped, total: course.holes.length };
   }
 
   function lastPlayPoint(hole) {
@@ -180,7 +212,7 @@
       holes: course.holes.map(function (h) {
         var tp = getTeePoint(course, h, teeSetId);
         return {
-          number: h.number, par: h.par,
+          number: h.number, par: h.par, line: h.line || null,
           teeLat: tp ? tp.lat : null, teeLon: tp ? tp.lon : null,
           greenLat: h.greenLat, greenLon: h.greenLon,
           shots: [], score: null
@@ -206,9 +238,13 @@
 
   function pinIcon(color, label, size) {
     size = size || 26;
+    var light = isLightColor(color);
+    var style = 'background:' + color + ';width:' + size + 'px;height:' + size + 'px;line-height:' + size + 'px' +
+      ';color:' + (light ? '#222' : '#fff') +
+      (light ? ';border-color:#555' : '');
     return L.divIcon({
       className: 'golf-pin',
-      html: '<div class="golf-pin-inner" style="background:' + color + ';width:' + size + 'px;height:' + size + 'px;line-height:' + size + 'px">' + (label || '') + '</div>',
+      html: '<div class="golf-pin-inner" style="' + style + '">' + (label || '') + '</div>',
       iconSize: [size, size],
       iconAnchor: [size / 2, size / 2]
     });
@@ -225,13 +261,15 @@
     mapEl.style.width = '100%';
     mapEl.style.height = '100%';
     leafletMap = L.map(mapEl, { tap: true });
-    var osmTiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 21, attribution: '&copy; OpenStreetMap contributors'
-    }).addTo(leafletMap);
+    // Satellite by default: golfers need to see actual fairways and greens,
+    // and it makes even OSM-unmapped courses usable for pin placement.
     var satTiles = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
       maxZoom: 20, attribution: 'Tiles &copy; Esri'
+    }).addTo(leafletMap);
+    var osmTiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'
     });
-    L.control.layers({ 'Map': osmTiles, 'Satellite': satTiles }, {}, { position: 'topright' }).addTo(leafletMap);
+    L.control.layers({ 'Satellite': satTiles, 'Street Map': osmTiles }, {}, { position: 'topright' }).addTo(leafletMap);
     leafletMap.setView([39.8283, -98.5795], 4);
     leafletMap.on('click', handleMapClick);
     return leafletMap;
@@ -280,6 +318,9 @@
     clearMapLayers();
     var layers = [];
 
+    if (hole.line && hole.line.length > 1) {
+      layers.push(L.polyline(hole.line, { color: '#ffffff', weight: 2, opacity: 0.65, dashArray: '2,6' }).addTo(leafletMap));
+    }
     if (hole.teeLat != null) {
       layers.push(L.marker([hole.teeLat, hole.teeLon], { icon: teeIcon('#1b5e3a') }).addTo(leafletMap).bindTooltip('Tee'));
     }
@@ -329,6 +370,9 @@
     (course.bunkerRings || []).forEach(function (ring) {
       layers.push(L.polygon(ring, { color: '#e8d9a0', weight: 1, fillOpacity: 0.4, stroke: false }).addTo(leafletMap));
     });
+    if (hole.line && hole.line.length > 1) {
+      layers.push(L.polyline(hole.line, { color: '#ffffff', weight: 2, opacity: 0.65, dashArray: '2,6' }).addTo(leafletMap));
+    }
 
     if (hole.greenLat != null) {
       var greenMarker = L.marker([hole.greenLat, hole.greenLon], { icon: greenIcon(), draggable: true })
@@ -475,7 +519,15 @@
       return '<option value="' + c.id + '"' + (c.id === selectedCourseId ? ' selected' : '') + '>' + escapeHtml(c.name) + '</option>';
     }).join('');
     var teeOptions = course.teeSets.map(function (t) {
-      return '<option value="' + t.id + '">' + escapeHtml(t.name) + '</option>';
+      var tot = courseTotalYards(course, t.id);
+      var label = t.name;
+      if (tot.mapped) {
+        label += ' — ' + tot.yards.toLocaleString() + ' yds' +
+          (tot.mapped < tot.total ? ' (' + tot.mapped + '/' + tot.total + ' holes mapped)' : '');
+      } else {
+        label += ' — needs pins';
+      }
+      return '<option value="' + t.id + '">' + escapeHtml(label) + '</option>';
     }).join('');
     return '' +
       '<div class="card">' +
@@ -581,7 +633,8 @@
         var mappedHoles = c.holes.filter(function (h) { return h.greenLat != null; }).length;
         return '<div class="card course-card">' +
           '<div><div style="font-weight:700">' + escapeHtml(c.name) + '</div>' +
-          '<div class="meta">' + mappedHoles + '/' + c.holes.length + ' holes mapped &middot; ' + c.teeSets.length + ' tee set' + (c.teeSets.length !== 1 ? 's' : '') + '</div></div>' +
+          '<div class="meta">' + mappedHoles + '/' + c.holes.length + ' holes mapped &middot; ' +
+          c.teeSets.map(function (t) { return escapeHtml(t.name); }).join(' / ') + ' tees</div></div>' +
           '<div class="row">' +
           '<button class="btn secondary small" data-action="open-saved-course" data-course="' + c.id + '">Edit Map</button>' +
           '<button class="btn danger ghost small" data-action="delete-course" data-course="' + c.id + '">Delete</button>' +
@@ -605,7 +658,10 @@
     var modeChips = '<button class="tab-btn' + (ed.mode.type === 'green' ? ' active' : '') + '" data-action="editor-set-mode" data-mode="green">&#9971; Green</button>' +
       course.teeSets.map(function (t) {
         var active = ed.mode.type === 'tee' && ed.mode.teeSetId === t.id;
-        return '<button class="tab-btn' + (active ? ' active' : '') + '" data-action="editor-set-mode" data-mode="tee" data-tee="' + t.id + '" style="' + (active ? ('background:' + t.color + ';border-color:' + t.color) : ('border-color:' + t.color)) + '">' + escapeHtml(t.name) + '</button>';
+        var chipStyle = active ?
+          ('background:' + t.color + ';border-color:' + (isLightColor(t.color) ? '#555' : t.color) + ';color:' + (isLightColor(t.color) ? '#222' : '#fff')) :
+          ('border-color:' + (isLightColor(t.color) ? '#999' : t.color));
+        return '<button class="tab-btn' + (active ? ' active' : '') + '" data-action="editor-set-mode" data-mode="tee" data-tee="' + t.id + '" style="' + chipStyle + '">' + escapeHtml(t.name) + '</button>';
       }).join('') +
       '<button class="tab-btn" data-action="editor-add-tee-set">+ Tee Set</button>';
 
@@ -628,7 +684,7 @@
       '<div class="card">' +
       '<h3 style="margin:0">' + escapeHtml(course.name) + '</h3>' +
       (course.address ? '<p class="hole-meta">' + escapeHtml(course.address) + '</p>' : '') +
-      (totallyUnmapped ? '<p class="hint">OpenStreetMap doesn\'t have detailed hole data for this course yet. Place each hole\'s tee and green pins manually below.</p>' : '') +
+      (totallyUnmapped ? '<p class="hint">OpenStreetMap doesn\'t have hole-by-hole data for this course (coverage is volunteer-mapped and varies). The satellite view below shows the real fairways and greens &mdash; tap each hole\'s tee and green once to map it, and it\'s saved for good.</p>' : '') +
       '</div>' +
       '<div class="hole-strip">' + holeDots + '</div>' +
       '<div class="tabs">' + modeChips + '</div>' +
@@ -774,13 +830,44 @@
         ui.search.loading = true;
         render();
         window.GolfOSM.loadCourseDetail(hit).then(function (detail) {
+          // Build tee sets straight from OSM colour tags (Blue/White/Red...)
+          // when present; otherwise a single editable Default set.
+          var teeSetKeys = detail.teeSetKeys || [];
+          var teeSets, keyToId = {};
+          if (teeSetKeys.length) {
+            teeSets = teeSetKeys.map(function (key, i) {
+              var id = uid() + i;
+              keyToId[key] = id;
+              return { id: id, name: capitalize(key), color: colorForTeeKey(key, i) };
+            });
+          } else {
+            teeSets = [{ id: uid(), name: 'Default', color: TEE_COLORS[0] }];
+          }
+          var holes = (detail.holes.length ? detail.holes : makeBlankHoles(18)).map(function (h) {
+            var overrides = {};
+            Object.keys(h.teesBySet || {}).forEach(function (key) {
+              if (keyToId[key]) overrides[keyToId[key]] = h.teesBySet[key];
+            });
+            return {
+              number: h.number, par: h.par, line: h.line || null,
+              defaultTeeLat: h.defaultTeeLat != null ? h.defaultTeeLat : null,
+              defaultTeeLon: h.defaultTeeLon != null ? h.defaultTeeLon : null,
+              greenLat: h.greenLat != null ? h.greenLat : null,
+              greenLon: h.greenLon != null ? h.greenLon : null,
+              teeOverrides: overrides
+            };
+          });
           var newCourse = {
             id: uid(), source: 'osm', osmType: detail.osmType, osmId: detail.osmId,
             name: detail.name, address: hit.address, lat: detail.lat, lon: detail.lon,
             boundary: detail.boundary, fairwayRings: detail.fairwayRings || [], bunkerRings: detail.bunkerRings || [],
-            holes: detail.holes.length ? detail.holes : makeBlankHoles(18),
-            teeSets: [{ id: uid(), name: 'Default', color: TEE_COLORS[0] }]
+            holes: holes,
+            teeSets: teeSets
           };
+          // Longest tees first, matching how scorecards order them.
+          newCourse.teeSets.sort(function (a, b) {
+            return (courseTotalYards(newCourse, b.id).yards || 0) - (courseTotalYards(newCourse, a.id).yards || 0);
+          });
           ui.search.loading = false;
           ui.courseEditor = { course: newCourse, isNew: true, currentHole: 1, mode: { type: 'green' } };
           ui.view = 'courseEditor';

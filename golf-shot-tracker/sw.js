@@ -1,6 +1,6 @@
-var CACHE = 'golf-shot-mapper-v2';
+var CACHE = 'golf-shot-mapper-v3';
 var ASSETS = [
-  './', './index.html', './css/style.css', './js/app.js', './js/osm.js',
+  './', './index.html', './css/style.css?v=3', './js/app.js?v=3', './js/osm.js?v=3',
   './manifest.json', './icons/icon.svg',
   './vendor/leaflet/leaflet.css', './vendor/leaflet/leaflet.js',
   './vendor/leaflet/images/marker-icon.png', './vendor/leaflet/images/marker-icon-2x.png',
