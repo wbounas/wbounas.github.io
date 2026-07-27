@@ -7,7 +7,14 @@
   'use strict';
 
   var NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
-  var OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+  // Public Overpass instances, tried in order. The main one 504s under load,
+  // so failover across mirrors is what keeps search usable.
+  var OVERPASS_URLS = [
+    'https://overpass-api.de/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter',
+    'https://overpass.private.coffee/api/interpreter'
+  ];
+  var OVERPASS_CLIENT_TIMEOUT_MS = 25000;
   var METERS_PER_MILE = 1609.344;
   // How far an untagged tee/green may sit from a hole line's start/end and
   // still be treated as belonging to that hole.
@@ -55,15 +62,43 @@
     return nominatimFetch({ q: q });
   }
 
+  // Index of the last mirror that answered, so a session sticks with a
+  // healthy one instead of re-hitting a struggling primary every query.
+  var overpassGoodIndex = 0;
+
+  function fetchWithTimeout(url, options, ms) {
+    if (typeof AbortController === 'undefined') return fetch(url, options);
+    var controller = new AbortController();
+    options.signal = controller.signal;
+    var timer = setTimeout(function () { controller.abort(); }, ms);
+    return fetch(url, options).finally(function () { clearTimeout(timer); });
+  }
+
   function overpassQuery(ql) {
-    return fetch(OVERPASS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: 'data=' + encodeURIComponent(ql)
-    }).then(function (res) {
-      if (!res.ok) throw new Error('Course data lookup failed (' + res.status + '). Overpass may be busy -- try again shortly.');
-      return res.json();
-    });
+    var order = [];
+    for (var i = 0; i < OVERPASS_URLS.length; i++) {
+      order.push((overpassGoodIndex + i) % OVERPASS_URLS.length);
+    }
+    function attempt(k) {
+      if (k >= order.length) {
+        return Promise.reject(new Error('The free OpenStreetMap course servers are all overloaded right now. Wait a minute and try again.'));
+      }
+      var idx = order[k];
+      return fetchWithTimeout(OVERPASS_URLS[idx], {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'data=' + encodeURIComponent(ql)
+      }, OVERPASS_CLIENT_TIMEOUT_MS).then(function (res) {
+        if (!res.ok) return attempt(k + 1);
+        return res.json().then(function (json) {
+          overpassGoodIndex = idx;
+          return json;
+        }, function () { return attempt(k + 1); });
+      }, function () {
+        return attempt(k + 1);
+      });
+    }
+    return attempt(0);
   }
 
   function nominatimHitToCourse(p) {
@@ -71,7 +106,7 @@
     var isGolf = p.class === 'leisure' && p.type === 'golf_course';
     if (!isGolf && p.extratags && p.extratags.leisure === 'golf_course') isGolf = true;
     if (!isGolf) return null;
-    if (p.osm_type !== 'way' && p.osm_type !== 'relation') return null;
+    if (p.osm_type !== 'way' && p.osm_type !== 'relation' && p.osm_type !== 'node') return null;
     return {
       osmType: p.osm_type,
       osmId: p.osm_id,
@@ -113,11 +148,9 @@
       var anchor = places[0];
       if (!anchor) return [];
       var lat = parseFloat(anchor.lat), lon = parseFloat(anchor.lon);
-      var ql = '[out:json][timeout:25];' +
-        '(' +
-        'way(around:40000,' + lat + ',' + lon + ')[leisure=golf_course];' +
-        'relation(around:40000,' + lat + ',' + lon + ')[leisure=golf_course];' +
-        ');out center tags;';
+      var ql = '[out:json][timeout:20];' +
+        'nwr(around:40000,' + lat + ',' + lon + ')[leisure=golf_course];' +
+        'out center tags;';
       return overpassQuery(ql).then(function (data) {
         return parseNearbyCourses(data, lat, lon);
       });
